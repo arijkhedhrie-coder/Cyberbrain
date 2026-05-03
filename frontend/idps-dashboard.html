@@ -1,0 +1,127 @@
+// src/api/idpsDashboardApi.ts
+// Connecté à dashboard_api.py (Flask, port 5000)
+// Tous les types correspondent exactement aux endpoints réels
+
+import axios from "axios";
+
+const FLASK_BASE = "http://localhost:5000";
+
+// ── Types issus des endpoints réels ──────────────────────
+
+export interface KpiData {
+  available: boolean;
+  missing_data: string[];
+  health_score: number | null;
+  ssh_failures: number | null;
+  blocked_ips: number | null;
+  alert_status: string | null;
+  attack_pattern: string | null;
+  ip_entropy: number | null;
+  unique_attacking_ips: number | null;
+  attack_velocity: number | null;
+  is_velocity_spike: boolean;
+  night_ratio: number | null;
+  row_count: number | null;
+  server_count: number | null;
+  data_sources: string[];
+  deduped_count: number | null;
+  noise_ratio: number | null;
+  data_quality: string | null;
+}
+
+export interface AlarmItem {
+  id: string;
+  timestamp: string;
+  type: string;
+  source_ip: string;
+  severity: "CRITICAL" | "HIGH" | "MED" | "LOW" | "INFO";
+  engine: string;
+  score: number;
+  message: string;
+  human_insight: string;
+  action: string;
+  country: string;
+  failures: number;
+}
+
+export interface EngineScore {
+  engine: string;
+  score: number;
+  pass1: number;
+  pass2: number;
+  alarms: number;
+  status: "ALARM" | "CLEAR";
+  rerun_p2: boolean;
+}
+
+export interface AgentDecision {
+  id: string;
+  ts: string;
+  agent: string;
+  action: string;
+  threat: string;
+  confidence: number;
+  severity: string;
+  reasoning: string;
+  targets: string[];
+  config: Record<string, unknown> | null;
+  approved: boolean | null;
+  feedback: string;
+}
+
+export interface SessionSummary {
+  date: string;
+  threat_level: string;
+  nb_alarms_pass1: number;
+  nb_alarms_final: number;
+  pass2_ran: boolean;
+  health_score: number | null;
+  ips_suspectes: string[];
+  attack_pattern: string;
+}
+
+export interface TrustData {
+  available: boolean;
+  model_agreement: number | null;
+  false_positive_rate: number | null;
+  drift_score: number | null;
+  drift_label: string;
+  drift_flagged: boolean;
+  stability: string;
+  confidence_in_metrics: number | null;
+  confidence_label: string;
+  signals_summary: string;
+}
+
+export interface PipelineLatest {
+  events: Record<string, unknown>[];
+  log_lines: string[];
+  step_count: number;
+}
+
+export interface HealthCheck {
+  status: string;
+  version: string;
+  timestamp: string;
+  memory_file_exists: boolean;
+  output_dir_exists: boolean;
+  latest_session_file: string | null;
+}
+
+// ── Fetch helpers avec timeout ────────────────────────────
+
+const get = async <T>(path: string, timeout = 4000): Promise<T> => {
+  const res = await axios.get<T>(`${FLASK_BASE}${path}`, { timeout });
+  return res.data;
+};
+
+export const fetchHealth       = () => get<HealthCheck>("/api/health");
+export const fetchKpis         = () => get<KpiData>("/api/kpis");
+export const fetchAlarms       = () => get<AlarmItem[]>("/api/alarms");
+export const fetchEngineScores = () => get<EngineScore[]>("/api/engine-scores");
+export const fetchDecisions    = () => get<AgentDecision[]>("/api/decisions");
+export const fetchSessions     = () => get<SessionSummary[]>("/api/sessions");
+export const fetchPipeline     = () => get<PipelineLatest>("/api/pipeline/latest");
+export const fetchLogs         = () => get<{ lines: string[] }>("/api/logs/stream");
+export const fetchTrust        = () => get<TrustData>("/api/trust");
+export const fetchMemory       = () => get<Record<string, unknown>>("/api/memory");

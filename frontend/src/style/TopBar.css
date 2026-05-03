@@ -1,0 +1,120 @@
+/* src/style/Topbar.css */
+
+.topbar {
+  height: var(--topbar-h, 56px);
+  background: rgba(8, 10, 28, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(108,92,231,0.12);
+  display: flex; align-items: center;
+  padding: 0 20px; gap: 10px;
+  flex-shrink: 0;
+  position: relative; z-index: 5;
+}
+
+/* Subtle glow line at bottom */
+.topbar::after {
+  content: '';
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(108,92,231,0.4), rgba(0,245,255,0.3), transparent);
+  pointer-events: none;
+}
+
+.topbar__breadcrumb {
+  font-size: 11px; color: rgba(255,255,255,0.25);
+  font-family: var(--font-mono, monospace);
+}
+.topbar__separator { color: rgba(255,255,255,0.12); font-size: 14px; }
+.topbar__title     { font-size: 13px; font-weight: 600; color: var(--text, #e8f0ff); }
+
+.topbar__actions {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 8px;
+}
+
+/* Status badges */
+.topbar__badge {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 11px; border-radius: 20px;
+  font-size: 10.5px; font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  backdrop-filter: blur(8px);
+  transition: box-shadow 0.2s;
+}
+.topbar__badge-dot { width:5px; height:5px; border-radius:50%; flex-shrink:0; }
+
+.topbar__badge--live {
+  background: rgba(255,59,59,0.12);
+  border: 1px solid rgba(255,59,59,0.2);
+  color: #ff6b6b; letter-spacing:.05em;
+}
+.topbar__badge--live .topbar__badge-dot {
+  background: #ff3b3b;
+  animation: live-pulse 1s ease-in-out infinite;
+  box-shadow: 0 0 5px rgba(255,59,59,0.7);
+}
+
+.topbar__badge--ws-on {
+  background: rgba(0,230,118,0.1);
+  border: 1px solid rgba(0,230,118,0.2);
+  color: #00e676;
+}
+.topbar__badge--ws-on .topbar__badge-dot {
+  background: #00e676;
+  animation: dot-pulse 2s ease-in-out infinite;
+  box-shadow: 0 0 5px rgba(0,230,118,0.6);
+}
+
+.topbar__badge--ws-off {
+  background: rgba(255,59,59,0.1);
+  border: 1px solid rgba(255,59,59,0.15);
+  color: #ff6b6b;
+}
+.topbar__badge--ws-off .topbar__badge-dot { background: #ff3b3b; }
+
+.topbar__badge--api-on {
+  background: rgba(0,245,255,0.08);
+  border: 1px solid rgba(0,245,255,0.18);
+  color: #00f5ff;
+}
+.topbar__badge--api-on .topbar__badge-dot {
+  background: #00f5ff;
+  animation: dot-pulse 1.5s ease-in-out infinite;
+  box-shadow: 0 0 5px rgba(0,245,255,0.6);
+}
+.topbar__badge--api-on:hover { box-shadow: 0 0 12px rgba(0,245,255,0.2); }
+
+.topbar__badge--api-off {
+  background: rgba(255,159,67,0.1);
+  border: 1px solid rgba(255,159,67,0.2);
+  color: #ff9f43;
+}
+.topbar__badge--api-off .topbar__badge-dot { background: #ff9f43; }
+
+/* Relancer button */
+.topbar__btn {
+  padding: 5px 13px; border-radius: 8px;
+  border: 1px solid rgba(108,92,231,0.3);
+  background: rgba(108,92,231,0.1);
+  color: #c4b5fd;
+  font-size: 11px; font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  cursor: pointer; letter-spacing: .02em;
+  transition: all 0.2s ease;
+  position: relative; overflow: hidden;
+}
+.topbar__btn::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.4s ease;
+}
+.topbar__btn:hover::before { transform: translateX(100%); }
+.topbar__btn:hover {
+  border-color: rgba(0,245,255,0.5);
+  color: #00f5ff;
+  box-shadow: 0 0 14px rgba(0,245,255,0.15);
+  transform: translateY(-1px);
+}
