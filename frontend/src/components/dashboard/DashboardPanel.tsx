@@ -1,25 +1,15 @@
 // src/components/dashboard/DashboardPanel.tsx
-// ─────────────────────────────────────────────────────────────────────────────
-// Dashboard enrichi — consignes encadrante (meet 1 + meet 2) :
-//   ✅ KPI cards row (health, lignes, alarmes, entropy, IPs)
-//   ✅ Pie chart répartition alarmes par sévérité (SVG inline)
-//   ✅ Bar chart scores par moteur avec valeurs exactes
-//   ✅ Filtrage alarmes par sévérité (CRITICAL / HIGH / ALL)
-//   ✅ Courbe de minimisation améliorée (health score + alarmes)
-//   ✅ Live Alarm Feed avec badge WS
-//   ✅ Agents CrewAI avec workflow complet
-//   ✅ Trust Gate enrichi
-//   ✅ Terminal pipeline logs
-// ─────────────────────────────────────────────────────────────────────────────
+
 
 import { useState } from "react";
 import type { FC, ReactNode } from "react";
+import logo from "../../assets/cyberbrain.png";
 import type {
   KpiData, AlarmItem, EngineScore,
   AgentDecision, TrustData, SessionSummary,
 } from "../../types/idps";
 import { LiveAlarmFeed } from "./LiveAlarmFeed";
-
+import type { CorrectiveSuggestion } from "../../types/idps";
 // ═══════════════════════════════════════════════════════════════════════════════
 // Helpers visuels
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -50,6 +40,13 @@ const Card: FC<{ title: string; tag?: string; tagRed?: boolean; children: ReactN
   </div>
 );
 
+
+const Header = () => (
+  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+    <img src={logo} alt="Cyberbrain Logo" style={{ width: 40 }} />
+    <h1 style={{ margin: 0 }}>CYBERBRAIN</h1>
+  </div>
+);
 // ═══════════════════════════════════════════════════════════════════════════════
 // KPI Card row
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -542,10 +539,12 @@ interface Props {
   loading:     boolean;
   wsConnected: boolean;
   isLive:      boolean;
+  suggestions: CorrectiveSuggestion[];
 }
 
 export const DashboardPanel: FC<Props> = ({
   kpis, alarms, engines, decisions, sessions, logLines, trust, loading, wsConnected, isLive,
+  suggestions,
 }) => {
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 320, flexDirection: "column", gap: 16, color: "var(--muted,#6b7280)", fontSize: 13 }}>

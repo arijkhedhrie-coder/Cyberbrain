@@ -131,6 +131,19 @@ def store_suggestion(payload: SuggestionPayload) -> dict:
         "timestamp":     payload.timestamp or datetime.now().isoformat(),
         "status":        "PENDING",
     }
+    # broadcast WebSocket type "suggestion" vers le frontend
+    try:
+        from api_auth import _run_broadcast
+        _run_broadcast({
+            "type":       "suggestion",
+            "suggestion": {
+                **payload.dict(),
+                "suggestion_id": sid,
+                "status":        "PENDING",
+                },
+                })
+    except Exception as e:
+        print(f"[WS][WARN] broadcast suggestion: {e}")
     return {"suggestion_id": sid, "status": "PENDING"}
 
 

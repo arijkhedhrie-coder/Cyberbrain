@@ -1,12 +1,10 @@
 // src/pages/DashboardPage.tsx
 // ─────────────────────────────────────────────────────────────────────────────
-// FICHIER CORRIGÉ — connecte TrackServersPanel aux données réelles
-//                 + intègre CorrectiveAgentPanel sans erreur TypeScript
-//
-// CORRECTIONS :
-//    [C1] Type section étendu : "dashboard" | "track" | "corrective"
-//    [C2] Sidebar et TopBar reçoivent le bon type (défini en local)
-//    [C3] CorrectiveAgentPanel rendu dans la section "corrective"
+// FIXES :
+//   ✅ [FIX-1] suggestions extrait de useIdpsDashboard
+//   ✅ [FIX-2] CorrectiveAgentPanel reçoit suggestions + wsConnected
+//   ✅ [FIX-3] Import named { CorrectiveAgentPanel } au lieu de default
+//   ✅ [FIX-4] DashboardPanel reçoit suggestions
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useCallback, useEffect, useRef } from "react";
@@ -19,14 +17,13 @@ import { useDarkMode }       from "../hooks/useDarkMode";
 import { Sidebar }              from "../components/dashboard/Sidebar";
 import { TopBar }               from "../components/dashboard/TopBar";
 import { DashboardPanel }       from "../components/dashboard/DashboardPanel";
-import CorrectiveAgentPanel     from "../components/dashboard/CorrectiveAgentPanel";
+import { CorrectiveAgentPanel } from "../components/dashboard/CorrectiveAgentPanel"; // ✅ FIX-3 named import
 import { TrackServersPanel }    from "../components/dashboard/TrackServersPanel";
 
 import "../style/global.css";
 import "../style/theme.css";
 import "../style/Sidebar.css";
 
-// ✅ [C1] Type section centralisé ici — identique à Sidebar.tsx et TopBar.tsx
 type Section = "dashboard" | "track" | "corrective";
 
 // ── StarField ─────────────────────────────────────────────────────────────────
@@ -132,27 +129,25 @@ const StarField = () => {
 
 // ── DashboardPage ─────────────────────────────────────────────────────────────
 export const DashboardPage = () => {
-  const { logout }  = useAuth();
-  const navigate    = useNavigate();
+  const { logout } = useAuth();
+  const navigate   = useNavigate();
 
   const [theme, toggleTheme] = useDarkMode();
-
-  // ✅ [C1] useState typé avec Section — inclut "corrective"
   const [section, setSection] = useState<Section>("dashboard");
   const [selectedServers, setSelectedServers] = useState<string[]>(["auth", "web"]);
 
-  // ✅ Callback stable
   const handleServersChange = useCallback((servers: string[]) => {
     setSelectedServers(servers);
   }, []);
 
-  // ✅ useIdpsDashboard reçoit selectedServers → filtre REST + WS automatiquement
+  // ✅ [FIX-1] suggestions ajouté à la déstructuration
   const {
     apiReady, loading, lastUpdate,
     kpis, alarms, engines, decisions,
     sessions, logLines, trust,
     sessionCount, logsAnalysed, threatLevel,
     wsConnected, isLive,
+    suggestions,        // ← était absent → CorrectiveAgentPanel recevait undefined
   } = useIdpsDashboard(selectedServers);
 
   return (
@@ -161,7 +156,6 @@ export const DashboardPage = () => {
 
       <div className="page-shell">
 
-        {/* ✅ [C2] Sidebar reçoit section de type Section — pas d'erreur ts(2322) */}
         <Sidebar
           activeSection={section}
           onSectionChange={setSection}
@@ -177,7 +171,6 @@ export const DashboardPage = () => {
 
         <div className="main-content">
 
-          {/* ✅ [C2] TopBar reçoit section de type Section — pas d'erreur ts(2322) */}
           <TopBar
             section={section}
             apiReady={apiReady}
@@ -190,7 +183,9 @@ export const DashboardPage = () => {
 
           <div className="main-content__scroll">
 
+            {/* ── Dashboard principal ── */}
             {section === "dashboard" && (
+              // ✅ [FIX-4] suggestions passé à DashboardPanel
               <DashboardPanel
                 kpis={kpis}
                 alarms={alarms}
@@ -202,12 +197,20 @@ export const DashboardPage = () => {
                 loading={loading}
                 wsConnected={wsConnected}
                 isLive={isLive}
+                suggestions={suggestions}
               />
             )}
 
-            {/* ✅ [C3] Agent correcteur rendu sans conflit de type */}
-            {section === "corrective" && <CorrectiveAgentPanel />}
+            {/* ── Agent correcteur ── */}
+            {section === "corrective" && (
+              // ✅ [FIX-2] suggestions + wsConnected passés — écran noir corrigé
+              <CorrectiveAgentPanel
+                suggestions={suggestions}
+                wsConnected={wsConnected}
+              />
+            )}
 
+            {/* ── Track Servers ── */}
             {section === "track" && (
               <TrackServersPanel
                 kpis={kpis}

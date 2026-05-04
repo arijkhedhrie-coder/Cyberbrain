@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-# ─────────────────────────────────────────────────────────────────────────────
-# api_auth.py — Point d'entrée FastAPI
-# ✅ /auth/login  /auth/signup  (via auth.py)
-# ✅ /api/kpis  /api/alarms  /api/engine-scores  ... (via api_dashboard.py)
-# ✅ /ws/logs  WebSocket temps réel
-# ─────────────────────────────────────────────────────────────────────────────
 
 import asyncio
 import json
@@ -16,10 +10,20 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from auth import router as auth_router
 from api_dashboard import router as dashboard_router
+from corrective_api import corrective_router
+
+
+
+from collections import deque
+
+
+ALARMS_STORE: deque = deque(maxlen=500)
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="IDPS Dashboard API", version="2.0")
+
+app.include_router(auth_router)  
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,8 +37,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth_router)       # /auth/login  /auth/signup
-app.include_router(dashboard_router)  # /api/kpis  /api/alarms  etc.
+app.include_router(dashboard_router)
+app.include_router(corrective_router)
 
 # ── WebSocket state ───────────────────────────────────────────────────────────
 
@@ -70,8 +74,22 @@ async def ws_logs(websocket: WebSocket) -> None:
     connected_clients.append(websocket)
     _client_filters[websocket] = {"servers": [], "version": 0}
     print(f"[WS] connecté — actifs : {len(connected_clients)}")
+
+    # ✅ FIX — envoyer l'historique des alarmes au nouveau client
+    if ALARMS_STORE:
+        try:
+            recent = list(ALARMS_STORE)[-20:]
+            await websocket.send_json({
+                "type":   "history",
+                "alarms": recent,
+                "count":  len(recent),
+            })
+        except Exception:
+            pass
+
     try:
         while True:
+            
             try:
                 msg = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 try:
@@ -209,9 +227,29 @@ def _normalize_alarm(raw: dict, stage: str = "pass1", server_id: str = "") -> di
 
 def broadcast_alarm(raw_alarm: dict, stage: str = "pass1", server_id: str = "") -> None:
     try:
-        _run_broadcast({"type": "alarm", "alarm": _normalize_alarm(raw_alarm, stage, server_id=server_id)})
+        normalized = _normalize_alarm(raw_alarm, stage, server_id=server_id)
+
+      
+        ALARMS_STORE.append(normalized)
+        print(f"[ALARMS_STORE] +1 | total={len(ALARMS_STORE)} | {normalized.get('engine')} {normalized.get('severity')}")
+
+        # Broadcast WebSocket vers tous les clients connectés
+        _run_broadcast({"type": "alarm", "alarm": normalized})
+
     except Exception as e:
         print(f"[WS][WARN] broadcast_alarm: {e}")
+@app.get("/api/alarms/live")
+def get_live_alarms(limit: int = 100) -> dict:
+    """
+    Retourne les alarmes en mémoire vive (session courante).
+    Utilisé par le frontend au reconnect WebSocket ou polling.
+    Différent de /api/alarms qui lit long_term_memory.json (session passée).
+    """
+    alarms = list(ALARMS_STORE)[-limit:]
+    return {
+        "count":  len(alarms),
+        "alarms": list(reversed(alarms)),  # plus récentes en premier
+    }
 
 
 def broadcast_log(data: dict) -> None:
@@ -238,13 +276,11 @@ class _AlarmBroadcastPayload(_BaseModel):
     server_id: str = "server1"
 
 @app.post("/api/internal/broadcast-alarm")
+
 async def internal_broadcast_alarm(payload: _AlarmBroadcastPayload) -> dict:
-    """
-    FIX: Endpoint interne appelé par main.py quand il tourne hors uvicorn.
-    Reçoit une alarme via HTTP POST et la relaie aux clients WebSocket connectés.
-    """
+   
     broadcast_alarm(payload.alarm, stage=payload.stage, server_id=payload.server_id)
-    return {"ok": True}
+    return {"ok": True, "store_size": len(ALARMS_STORE)}
 
 @app.post("/api/internal/broadcast-metrics")
 async def internal_broadcast_metrics(data: dict) -> dict:

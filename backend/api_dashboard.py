@@ -2,13 +2,15 @@
 # ─────────────────────────────────────────────────────────────
 # Router FastAPI — expose /api/* en réutilisant dashboard_api.py
 #
-# NOUVEAUTÉ : paramètre ?servers= sur /api/kpis et /api/alarms
-# Mapping label frontend → engine backend :
-#   auth   → SSH
-#   web    → WEB
-#   ftp    → FTP
-#   kernel → KERNEL | SESSION
-# Si aucun serveur sélectionné → renvoie tout (comportement par défaut)
+# FIXES v3 :
+#   ✅ [FIX-1] Fallback final → [] au lieu de ["auth","web","ftp","kernel"]
+#              Expose les vrais problèmes au lieu de les masquer
+#   ✅ [FIX-2] Suppression de ("sys", "kernel") — trop générique
+#              Remplacé par ("syslog", "kernel") et ("system", "kernel")
+#   ✅ [FIX-3] Log WARN si label serveur inconnu dans _engines_for_servers
+#   ✅ [FIX-4] /api/servers retourne une structure riche :
+#              [{"id": "dataset_auth_...", "label": "auth", "display": "SSH Auth"}]
+#              + rétrocompatibilité : /api/servers?format=list → list[str]
 # ─────────────────────────────────────────────────────────────
 
 from __future__ import annotations
@@ -27,10 +29,6 @@ from dashboard_api import (
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
 # ── Mapping label frontend → moteurs backend ──────────────────
-# auth.log/sshd.log → domaine SSH
-# access.log/error.log → domaine WEB
-# vsftpd.log/xferlog → domaine FTP
-# syslog/kern.log/dmesg → domaines KERNEL + SESSION
 _LABEL_TO_ENGINES: dict[str, list[str]] = {
     "auth":   ["SSH"],
     "web":    ["WEB"],
@@ -38,16 +36,85 @@ _LABEL_TO_ENGINES: dict[str, list[str]] = {
     "kernel": ["KERNEL", "SESSION"],
 }
 
+# ── Libellés humains par label ────────────────────────────────
+_LABEL_DISPLAY: dict[str, str] = {
+    "auth":   "SSH Auth",
+    "web":    "Web Server",
+    "ftp":    "FTP Server",
+    "kernel": "Kernel/Sys",
+}
+
+# ✅ [FIX-2] Mapping mots-clés S3 → label métier
+# ORDRE IMPORTANT : du plus spécifique au plus général
+# "sys" supprimé car trop générique (match "system", "session", "analysis")
+_S3_KEYWORD_TO_LABEL: list[tuple[str, str]] = [
+    # SSH / auth — spécifiques en premier
+    ("sshd",     "auth"),
+    ("auth",     "auth"),
+    ("secure",   "auth"),
+    ("ssh",      "auth"),
+    # Web — spécifiques en premier
+    ("nginx",    "web"),
+    ("apache",   "web"),
+    ("access",   "web"),
+    ("http",     "web"),
+    ("web",      "web"),
+    # FTP — spécifiques en premier
+    ("vsftpd",   "ftp"),
+    ("xferlog",  "ftp"),
+    ("xfer",     "ftp"),
+    ("ftp",      "ftp"),
+    # Kernel / system — ✅ FIX: "syslog" et "system" au lieu de "sys"
+    ("kern",     "kernel"),
+    ("dmesg",    "kernel"),
+    ("syslog",   "kernel"),   # ← "syslog" avant "system"
+    ("system",   "kernel"),   # ← "system" explicite (pas "sys")
+    ("kernel",   "kernel"),
+    # ❌ ("sys", "kernel") SUPPRIMÉ — trop générique
+    # matchait "session", "analysis", "synology", etc.
+]
+
+_VALID_LABELS = set(_LABEL_TO_ENGINES.keys())
+
+
+def _s3_id_to_label(server_id: str) -> str | None:
+    """
+    Convertit un ID de fichier S3 (ex: "dataset_auth_2026-03-10_06-32")
+    en label métier (ex: "auth").
+    Retourne None si aucun label reconnu.
+    """
+    lower = server_id.lower()
+    for keyword, label in _S3_KEYWORD_TO_LABEL:
+        if keyword in lower:
+            return label
+    return None
+
 
 def _engines_for_servers(servers: list[str]) -> set[str]:
     """
-    Convertit une liste de labels de serveurs (ex: ["auth","web"])
-    en ensemble de moteurs backend (ex: {"SSH","WEB"}).
-    Si servers est vide → set vide (= pas de filtre).
+    ✅ [FIX-3] Convertit une liste de serveurs en ensemble de moteurs backend.
+
+    Accepte les deux formats :
+    - Labels métier directs : "auth", "web", "ftp", "kernel"
+    - IDs S3 timestamp    : "2026-03-10_06-32", "dataset_auth_2026-03-10"
+
+    Log WARN si un serveur n'est pas reconnu.
+    Retourne un set vide si servers est vide (= pas de filtre).
     """
     engines: set[str] = set()
-    for label in servers:
-        engines.update(_LABEL_TO_ENGINES.get(label.lower(), []))
+    for s in servers:
+        label = s.lower()
+        if label in _LABEL_TO_ENGINES:
+            # Format direct : "auth", "web", etc.
+            engines.update(_LABEL_TO_ENGINES[label])
+        else:
+            # Format S3 : tente de déduire le label métier
+            inferred = _s3_id_to_label(s)
+            if inferred:
+                engines.update(_LABEL_TO_ENGINES[inferred])
+            else:
+                # ✅ [FIX-3] Log visible au lieu d'ignorer silencieusement
+                print(f"[WARN][api_dashboard] Unknown server label: '{s}' — ignoré dans le filtre")
     return engines
 
 
@@ -70,68 +137,252 @@ def api_health() -> dict:
     }
 
 
+# ── /api/servers ──────────────────────────────────────────────
+@router.get("/servers")
+def api_servers(
+    format: str = Query(default="list"),   # "list" | "rich"
+) -> list:
+    """
+    Retourne les serveurs actifs avec fallback robuste en 5 étapes.
+
+    ?format=list (défaut) → list[str]  — labels métier pour le filtrage API
+    ?format=rich          → list[dict] — structure riche pour l'UI
+
+    Ordre de priorité des sources :
+      1. memory["sessions"][-1]["donnees"]["serveurs_actifs"]
+      2. memory["sessions"][-1]["donnees"]["server_ids"]
+      3. memory["sessions"][-1]["donnees"]["alarmes"][*].server_id
+      4. PIPELINE_START.data_sources dans le dernier JSONL
+      5. ✅ FALLBACK ENGINE : _build_engine_scores() → engines actifs → labels
+
+    Le fallback engine (étape 5) résout le cas où le pipeline tourne
+    mais ne sauvegarde pas encore server_ids (version antérieure du pipeline).
+    Tant que des alarmes existent avec engine=SSH/WEB/FTP/KERNEL,
+    les serveurs correspondants sont retournés.
+    """
+    memory   = _load_memory()
+    sessions = memory.get("sessions", [])
+
+    raw_ids: list[str] = []
+
+    if sessions:
+        last_session = sessions[-1]
+        donnees      = last_session.get("donnees", {})
+
+        # Source 1 : serveurs_actifs (labels métier directs)
+        s = donnees.get("serveurs_actifs")
+        if isinstance(s, list) and s:
+            raw_ids = [str(x) for x in s if x]
+
+        # Source 2 : server_ids
+        if not raw_ids:
+            s = donnees.get("server_ids")
+            if isinstance(s, list) and s:
+                raw_ids = [str(x) for x in s if x]
+
+        # Source 3 : alarmes → server_id ou Serveur
+        if not raw_ids:
+            alarmes = donnees.get("alarmes", [])
+            if isinstance(alarmes, list):
+                seen: set[str] = set()
+                for a in alarmes:
+                    if isinstance(a, dict):
+                        sid = a.get("server_id") or a.get("Serveur")
+                        if sid:
+                            seen.add(str(sid))
+                if seen:
+                    raw_ids = sorted(seen)
+
+    # Source 4 : PIPELINE_START.data_sources (JSONL)
+    if not raw_ids:
+        try:
+            events = _latest_jsonl()
+            from dashboard_api import _get_event
+            pipeline_start = _get_event(events, "PIPELINE_START") or {}
+            sources = pipeline_start.get("data_sources", [])
+            if isinstance(sources, list) and sources:
+                raw_ids = [str(s) for s in sources if s]
+        except Exception:
+            pass
+
+    # ── Tente de convertir raw_ids en labels métier ───────────
+    labels_found: set[str] = set()
+
+    if raw_ids:
+        for raw_id in raw_ids:
+            if raw_id.lower() in _VALID_LABELS:
+                labels_found.add(raw_id.lower())
+            else:
+                inferred = _s3_id_to_label(raw_id)
+                if inferred:
+                    labels_found.add(inferred)
+                else:
+                    print(f"[WARN][api_dashboard] ID non reconnu: '{raw_id}' — ignoré")
+
+    # Source 5 : FALLBACK ALARMES (prioritaire sur engine-scores)
+    # Lit depuis long_term_memory.json (toujours disponible si pipeline a tourné).
+    # _build_alarms(memory) ne dépend PAS des fichiers JSONL → plus fiable.
+    # Chaque alarme expose "engine" (SSH/WEB/FTP/KERNEL) → on déduit le label.
+    if not labels_found:
+        print("[INFO][api_dashboard] Fallback alarmes-mémoire pour détecter les serveurs")
+        _ENGINE_TO_LABEL_LOCAL = {
+            "SSH": "auth", "WEB": "web", "FTP": "ftp",
+            "KERNEL": "kernel", "SESSION": "kernel",
+            "PREDICTION": "kernel", "CORRELATION": "auth",
+        }
+        try:
+            memory3    = _load_memory()
+            all_alarms = _build_alarms(memory3)
+            for a in all_alarms:
+                engine = str(a.get("engine") or "").upper()
+                label  = _ENGINE_TO_LABEL_LOCAL.get(engine, "")
+                if label:
+                    labels_found.add(label)
+            if labels_found:
+                print(f"[INFO][api_dashboard] Labels déduits depuis alarmes: {labels_found}")
+            else:
+                print("[WARN][api_dashboard] Aucune alarme exploitable dans la mémoire")
+        except Exception as e:
+            print(f"[WARN][api_dashboard] Fallback alarmes échoué: {e}")
+
+    # Source 6 : FALLBACK ENGINE-SCORES (dépend des fichiers JSONL)
+    # Utilisé uniquement si la Source 5 a échoué.
+    if not labels_found:
+        print("[INFO][api_dashboard] Fallback engine-scores JSONL")
+        try:
+            events  = _latest_jsonl()
+            memory2 = _load_memory()
+            scores  = _build_engine_scores(events, memory2)
+            active_engines = {
+                str(s.get("engine", "")).upper()
+                for s in scores
+                if s.get("engine")
+            }
+            print(f"[INFO][api_dashboard] Engines JSONL détectés: {active_engines}")
+            for label, engines in _LABEL_TO_ENGINES.items():
+                if any(e in active_engines for e in engines):
+                    labels_found.add(label)
+        except Exception as e:
+            print(f"[WARN][api_dashboard] Fallback engine-scores échoué: {e}")
+
+    if not labels_found:
+        print("[WARN][api_dashboard] /api/servers : aucune source n'a fourni de labels → []")
+        return []
+
+    # Ordre logique des labels
+    ordered_labels = [l for l in ["auth", "web", "ftp", "kernel"] if l in labels_found]
+    ordered_labels += sorted(labels_found - set(ordered_labels))
+
+    print(f"[INFO][api_dashboard] /api/servers → {ordered_labels}")
+
+    # Format rich : structure complète pour l'UI
+    if format == "rich":
+        return [
+            {
+                "id":      label,
+                "label":   label,
+                "display": _LABEL_DISPLAY.get(label, label),
+                "sources": [label],
+            }
+            for label in ordered_labels
+        ]
+
+    # Format list (défaut) : list[str] de labels métier
+    return ordered_labels
+
+
 # ── /api/kpis  (filtre serveurs) ──────────────────────────────
 @router.get("/kpis")
 def api_kpis(
     servers: List[str] = Query(default=[]),
 ) -> dict:
-    """
-    Renvoie les KPIs filtrés par serveur.
-    ?servers=auth&servers=web  → KPIs des domaines SSH+WEB uniquement.
-    Aucun paramètre             → tous les serveurs.
-    """
     def load_all():
         events = _latest_jsonl()
         memory = _load_memory()
         return _build_kpis(events, memory)
 
-    # Sans filtre : version cachée normale
     if not servers:
         return _cached("kpis", load_all)
 
-    # Avec filtre : recalcul ciblé (pas de cache commun pour éviter les collisions)
     engines = _engines_for_servers(servers)
     cache_key = f"kpis_{'_'.join(sorted(servers))}"
 
     def load_filtered():
         events = _latest_jsonl()
         memory = _load_memory()
-        base = _build_kpis(events, memory)
+        base   = _build_kpis(events, memory)
 
         if not engines:
             return base
 
-        # Filtre ssh_failures (SSH uniquement)
         if "SSH" not in engines:
             base["ssh_failures"] = None
+            base["blocked_ips"]  = None
 
-        # Filtre blocked_ips (SSH)
-        if "SSH" not in engines:
-            base["blocked_ips"] = None
-
-        # Reconstruit attack_pattern selon les domaines actifs
-        # (on conserve si au moins un moteur actif, sinon on neutralise)
         active_engines_in_data = set()
         from dashboard_api import _get_event
-        pass1 = _get_event(events, "PASS1_COMPLETE")
+        pass1  = _get_event(events, "PASS1_COMPLETE")
         by_dom = pass1.get("alarms_by_domain", {})
         for eng in engines:
             if int(by_dom.get(eng, 0)) > 0:
                 active_engines_in_data.add(eng)
 
         if not active_engines_in_data:
-            # Aucune alarme dans les serveurs sélectionnés
-            base["ssh_failures"]       = 0
-            base["blocked_ips"]        = 0
-            base["alert_status"]       = "CLEAR"
-            base["health_score"]       = 100.0
+            base["ssh_failures"]        = 0
+            base["blocked_ips"]         = 0
+            base["alert_status"]        = "CLEAR"
+            base["health_score"]        = 100.0
             base["unique_attacking_ips"] = 0
-            base["attack_velocity"]    = 0.0
-            base["is_velocity_spike"]  = False
+            base["attack_velocity"]     = 0.0
+            base["is_velocity_spike"]   = False
 
         return base
 
     return _cached(cache_key, load_filtered)
+
+
+# ── Filtre alarmes à deux niveaux ────────────────────────────
+# Niveau 1 (prioritaire) : server_id direct (assigné par le pipeline après fix)
+# Niveau 2 (fallback)    : engine → label   (rétrocompatibilité alarmes sans server_id)
+_ENGINE_TO_LABEL: dict[str, str] = {
+    "SSH":         "auth",
+    "WEB":         "web",
+    "FTP":         "ftp",
+    "KERNEL":      "kernel",
+    "SESSION":     "kernel",
+    "PREDICTION":  "kernel",
+    "CORRELATION": "auth",
+}
+
+def _filter_alarms_by_servers(all_alarms: list[dict], servers: list[str]) -> list[dict]:
+    """
+    Filtre les alarmes sur les serveurs sélectionnés.
+
+    Double logique (couvre pipeline fixé ET alarmes legacy) :
+      1. server_id direct : a["server_id"] in servers
+      2. engine → label   : _ENGINE_TO_LABEL[a["engine"]] in servers
+
+    En production (après fix BLOC 2 de PATCH_main_py.py), toutes les
+    alarmes auront un server_id → le niveau 2 devient redondant mais
+    assure la rétrocompatibilité sans casser l'existant.
+    """
+    servers_set = {s.lower() for s in servers}
+    result = []
+
+    for a in all_alarms:
+        # Niveau 1 : server_id direct (pipeline fixé)
+        sid = str(a.get("server_id") or "").lower()
+        if sid and sid in servers_set:
+            result.append(a)
+            continue
+
+        # Niveau 2 : engine → label (fallback alarmes sans server_id)
+        engine = str(a.get("engine") or "").upper()
+        label  = _ENGINE_TO_LABEL.get(engine, "")
+        if label and label in servers_set:
+            result.append(a)
+
+    return result
 
 
 # ── /api/alarms  (filtre serveurs) ────────────────────────────
@@ -139,11 +390,6 @@ def api_kpis(
 def api_alarms(
     servers: List[str] = Query(default=[]),
 ) -> list:
-    """
-    Renvoie les alarmes filtrées par serveur.
-    ?servers=auth → uniquement les alarmes de moteur SSH.
-    Aucun paramètre → toutes les alarmes.
-    """
     def load_all():
         memory = _load_memory()
         return _build_alarms(memory)
@@ -151,22 +397,13 @@ def api_alarms(
     if not servers:
         return _cached("alarms", load_all)
 
-    engines = _engines_for_servers(servers)
     cache_key = f"alarms_{'_'.join(sorted(servers))}"
 
     def load_filtered():
-        memory = _load_memory()
+        memory     = _load_memory()
         all_alarms = _build_alarms(memory)
-
-        if not engines:
-            return all_alarms
-
-        # Filtre : garde uniquement les alarmes dont le moteur est dans engines
-        filtered = [
-            a for a in all_alarms
-            if a.get("engine", "").upper() in engines
-        ]
-        return filtered
+        # ✅ Filtre à deux niveaux : server_id direct + engine fallback
+        return _filter_alarms_by_servers(all_alarms, servers)
 
     return _cached(cache_key, load_filtered)
 
@@ -188,8 +425,8 @@ def api_engine_scores(
     cache_key = f"engine_scores_{'_'.join(sorted(servers))}"
 
     def load_filtered():
-        events = _latest_jsonl()
-        memory = _load_memory()
+        events     = _latest_jsonl()
+        memory     = _load_memory()
         all_scores = _build_engine_scores(events, memory)
         if not engines:
             return all_scores
@@ -211,28 +448,15 @@ def api_sessions() -> list:
             result.append({
                 "date":            s.get("date", ""),
                 "threat_level":    d.get("agent_threat_level", "NORMAL"),
-                "nb_alarms_pass1": int(d.get("nb_alarmes_pass1", d.get("nb_alarmes", 0))),
-                "nb_alarms_final": int(d.get("nb_alarmes_final", d.get("nb_alarmes", 0))),
+                "nb_alarms_pass1": d.get("nb_alarmes_pass1", 0),
+                "nb_alarms_final": d.get("nb_alarmes_final", 0),
                 "pass2_ran":       bool(d.get("pass2_ran", False)),
                 "health_score":    _as_float_or_none(d.get("health_score")),
                 "ips_suspectes":   d.get("ips_suspectes", []),
-                "attack_pattern":  d.get("attack_pattern", "unknown"),
+                "attack_pattern":  d.get("attack_pattern", ""),
             })
         return result
     return _cached("sessions", load)
-
-
-# ── /api/pipeline/latest ──────────────────────────────────────
-@router.get("/pipeline/latest")
-def api_pipeline_latest() -> dict:
-    def load():
-        events = _latest_jsonl()
-        return {
-            "events":     events,
-            "log_lines":  _build_log_lines(events),
-            "step_count": len(events),
-        }
-    return _cached("pipeline_latest", load)
 
 
 # ── /api/decisions ────────────────────────────────────────────
@@ -243,6 +467,19 @@ def api_decisions() -> list:
         memory = _load_memory()
         return _build_decisions(events, memory)
     return _cached("decisions", load)
+
+
+# ── /api/pipeline/latest ──────────────────────────────────────
+@router.get("/pipeline/latest")
+def api_pipeline_latest() -> dict:
+    def load():
+        events = _latest_jsonl()
+        return {
+            "events":     [e for e in events if isinstance(e, dict)][-50:],
+            "log_lines":  _build_log_lines(events)[-60:],
+            "step_count": len(events),
+        }
+    return _cached("pipeline_latest", load)
 
 
 # ── /api/trust ────────────────────────────────────────────────
@@ -304,60 +541,3 @@ def api_backtest_history() -> list:
         mem = _load_memory()
         return list(reversed(mem.get("backtest_history", [])))
     return _cached("backtest_history", load)
-
-# ── /api/servers ──────────────────────────────────────────────
-@router.get("/servers")
-def api_servers() -> list[str]:
-    """
-    Retourne la liste dynamique des serveurs depuis la dernière session.
-
-    Ordre de priorité des sources :
-    1. sessions[-1]["donnees"]["serveurs_actifs"]
-    2. sessions[-1]["donnees"]["server_ids"]
-    3. sessions[-1]["donnees"]["alarmes"][*].server_id
-    4. session_*.jsonl → PIPELINE_START.data_sources
-
-    Aucun fallback statique. Retourne [] si aucune donnée disponible.
-    """
-
-    memory = _load_memory()
-    sessions = memory.get("sessions", [])
-
-    if not sessions:
-        return []
-
-    last_session = sessions[-1]
-    donnees = last_session.get("donnees", {})
-
-    # ── Source 1 : serveurs_actifs ─────────────────────────────
-    servers = donnees.get("serveurs_actifs")
-    if isinstance(servers, list) and servers:
-        return sorted({str(s) for s in servers if s})
-
-    # ── Source 2 : server_ids ──────────────────────────────────
-    servers = donnees.get("server_ids")
-    if isinstance(servers, list) and servers:
-        return sorted({str(s) for s in servers if s})
-
-    # ── Source 3 : alarmes ─────────────────────────────────────
-    alarmes = donnees.get("alarmes", [])
-    if isinstance(alarmes, list) and alarmes:
-        extracted = {
-            str(a.get("server_id") or a.get("Serveur"))
-            for a in alarmes
-            if isinstance(a, dict) and (a.get("server_id") or a.get("Serveur"))
-        }
-        if extracted:
-            return sorted(extracted)
-
-    # ── Source 4 : JSONL pipeline ──────────────────────────────
-    try:
-        events = _latest_jsonl()
-        pipeline_start = _get_event(events, "PIPELINE_START") or {}
-        sources = pipeline_start.get("data_sources", [])
-        if isinstance(sources, list) and sources:
-            return sorted({str(s) for s in sources if s})
-    except Exception:
-        pass
-
-    return []

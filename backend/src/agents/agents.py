@@ -17,6 +17,10 @@ Fusion complète :
       [C5] Broadcast WebSocket CORRECTIVE_SUGGESTION vers le dashboard
       [C6] Sauvegarde S3 différenciée : training_log / suggestion_log / auto_action_log
       [C7] Corrector Agent backstory mise à jour (semi-automatique, Human-in-the-Loop)
+  - FIXES v2 :
+      [FIX-1] broadcast_alarm dans OutilDeclencherAlarme correctement indenté dans la boucle
+      [FIX-2] POST /api/corrective/suggestion correctement indenté dans le bloc SUGGESTION
+      [FIX-3] server_id propagé depuis l'alarme vers broadcast_alarm
 
 Architecture multi-agents CrewAI — 6 agents spécialisés :
   1. Collecteur       — Récupère les logs depuis S3
@@ -99,14 +103,7 @@ except ImportError:
 # ═════════════════════════════════════════════════════════════════════════════
 # 🎯 CONFIGURATION GLOBALE DE L'AGENT CORRECTEUR — [C1]
 # ═════════════════════════════════════════════════════════════════════════════
-# ⚙️  CHANGER ICI pour faire évoluer le système :
-#     "TRAINING"   → Phase 1 : apprentissage pur, aucune action exécutée
-#     "SUGGESTION" → Phase 2 : suggestions soumises à validation humaine
-#     "AUTO"       → Phase 3 : automatisation conditionnelle (confidence ≥ 0.85)
-
 AGENT_MODE: str = os.getenv("CORRECTIVE_AGENT_MODE", "SUGGESTION")
-
-# Seuil de confiance pour l'exécution automatique en mode AUTO
 CONFIDENCE_THRESHOLD_AUTO: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.85"))
 
 print(f"[CORRECTIVE AGENT] Mode actif : {AGENT_MODE} | Seuil confiance AUTO : {CONFIDENCE_THRESHOLD_AUTO}")
@@ -117,16 +114,7 @@ print(f"[CORRECTIVE AGENT] Mode actif : {AGENT_MODE} | Seuil confiance AUTO : {C
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _compute_confidence(type_upper: str, severite: str, ip: str) -> float:
-    """
-    Calcule un score de confiance (0.0 → 1.0) selon le type d'attaque,
-    la sévérité et la qualité des données reçues.
-
-    Règle :
-      >= 0.85  → action automatique autorisée (mode AUTO uniquement)
-      0.65-0.84 → suggestion uniquement
-      < 0.65  → suggestion + flag "faible confiance"
-    """
-    score = 0.5  # base neutre
+    score = 0.5
 
     if "BRUTE" in type_upper or "SSH" in type_upper:
         score = 0.90
@@ -139,13 +127,11 @@ def _compute_confidence(type_upper: str, severite: str, ip: str) -> float:
     elif "USER" in type_upper or "UTILISATEUR" in type_upper:
         score = 0.68
     else:
-        score = 0.50  # type inconnu → confiance basse
+        score = 0.50
 
-    # Bonus sévérité critique
     if str(severite).upper() == "CRITIQUE":
         score = min(score + 0.05, 1.0)
 
-    # Malus si IP inutilisable
     if not ip or ip in ("N/A", "multiple", ""):
         score = max(score - 0.15, 0.0)
 
@@ -174,7 +160,7 @@ def _get_risque(type_upper: str) -> str:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 📚 BASE DE CONNAISSANCE — [C3] (utilisée en Phase 1 TRAINING)
+# 📚 BASE DE CONNAISSANCE — [C3]
 # ═════════════════════════════════════════════════════════════════════════════
 
 KNOWLEDGE_BASE: dict = {
@@ -228,7 +214,6 @@ KNOWLEDGE_BASE: dict = {
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _build_action(type_upper: str, ip: str, severite: str, anomalie: dict) -> dict:
-    """Construit le dictionnaire d'action corrective SANS l'exécuter."""
     if "BRUTE" in type_upper or "SSH" in type_upper:
         if str(severite).upper() == "CRITIQUE":
             return {
@@ -273,24 +258,20 @@ def _build_action(type_upper: str, ip: str, severite: str, anomalie: dict) -> di
             "type":        "INSPECTION_MANUELLE",
             "description": "Anomalie non reconnue — inspection manuelle requise",
         }
+
+
 # ================================
 # LLM — Groq avec garde rate-limit automatique
-#
-# Groq free tier : 6000 TPM
-# Fix : patch llm.__class__.call — couvre 100 % des appels CrewAI
 # ================================
 llm = LLM(
     model="groq/llama-3.1-8b-instant",
     api_key=GROQ_API_KEY,
     temperature=0.0,
-    max_tokens=150,   # default for simple agents (collector, reporter, corrector)
+    max_tokens=150,
     max_retries=3,
     timeout=90,
 )
 
-# Orchestrator needs more tokens: its JSON template alone is ~250 chars.
-# At 150 tokens the LLM truncates mid-JSON and defaults to NORMAL.
-# 400 tokens = enough for the full JSON + one reasoning sentence.
 llm_orchestrator = LLM(
     model="groq/llama-3.1-8b-instant",
     api_key=GROQ_API_KEY,
@@ -300,8 +281,6 @@ llm_orchestrator = LLM(
     timeout=90,
 )
 
-# Analyst needs enough space to write 4 lines of structured analysis.
-# 150 tokens cuts off mid-line. 300 is sufficient.
 llm_analyst = LLM(
     model="groq/llama-3.1-8b-instant",
     api_key=GROQ_API_KEY,
@@ -312,12 +291,11 @@ llm_analyst = LLM(
 )
 
 _last_llm_call = [0.0]
-_MIN_DELAY_SECONDS = 13   # ~4-5 appels/min → safe sous 6000 TPM
+_MIN_DELAY_SECONDS = 13
 
 _original_llm_call = llm.__class__.call
 
 def _throttled_llm_call(self, *args, **kwargs):
-    """Wrapper rate-limiting : gap minimum entre chaque appel Groq."""
     elapsed = time.time() - _last_llm_call[0]
     if elapsed < _MIN_DELAY_SECONDS:
         wait = _MIN_DELAY_SECONDS - elapsed
@@ -342,20 +320,14 @@ def _throttled_llm_call(self, *args, **kwargs):
 llm.__class__.call = _throttled_llm_call
 
 def _throttle():
-    """Alias de compatibilité — le patch gère tout automatiquement."""
     pass
 
 
 # ================================
-# DISPATCHER MCP — APPELS PYTHON DIRECTS (pas de subprocess)
+# DISPATCHER MCP
 # ================================
 def _appeler_mcp(nom_outil: str, arguments: dict) -> str:
-    """
-    Dispatch direct en appels Python — pas de subprocess ni de JSON-RPC.
-    Retourne toujours un str.
-    """
     try:
-        # ── OUTIL 1 : Lire un fichier log depuis S3 ───────────────────────
         if nom_outil == "lire_logs_s3":
             if not _S3_DISPONIBLE:
                 return "[SIMULATION] lire_logs_s3 — s3_tools non disponible"
@@ -366,7 +338,6 @@ def _appeler_mcp(nom_outil: str, arguments: dict) -> str:
             except Exception as e:
                 return f"Erreur lecture S3: {e}"
 
-        # ── OUTIL 2 : Lister les fichiers logs dans S3 ────────────────────
         if nom_outil == "lister_logs_s3":
             if not _S3_DISPONIBLE:
                 return "[SIMULATION] lister_logs_s3 — s3_tools non disponible"
@@ -378,7 +349,6 @@ def _appeler_mcp(nom_outil: str, arguments: dict) -> str:
             except Exception as e:
                 return f"Erreur listage S3: {e}"
 
-        # ── OUTIL 3 : Analyser les logs ───────────────────────────────────
         if nom_outil == "analyser_logs":
             logs   = arguments.get("contenu_logs") or arguments.get("contenu") or ""
             lignes = logs.split("\n")
@@ -400,7 +370,6 @@ def _appeler_mcp(nom_outil: str, arguments: dict) -> str:
                 "Top erreurs:\n" + "\n".join(erreurs[:3])
             )
 
-        # ── OUTIL 4 : Détecter anomalies ──────────────────────────────────
         if nom_outil == "detecter_anomalies":
             donnees   = str(arguments.get("donnees") or arguments.get("rapport") or arguments.get("contenu_logs") or "")
             donnees_l = donnees.lower()
@@ -419,7 +388,6 @@ def _appeler_mcp(nom_outil: str, arguments: dict) -> str:
                 anomalies.append("OK: Aucune anomalie critique detectee")
             return "ANOMALIES DETECTEES:\n" + "\n".join(anomalies)
 
-        # ── OUTIL 5 : Sauvegarder rapport sur S3 ─────────────────────────
         if nom_outil == "sauvegarder_rapport_s3":
             if not _S3_DISPONIBLE:
                 return "[SIMULATION] sauvegarder_rapport_s3 — s3_tools non disponible"
@@ -434,7 +402,6 @@ def _appeler_mcp(nom_outil: str, arguments: dict) -> str:
             except Exception as e:
                 return f"Erreur sauvegarde S3: {e}"
 
-        # ── OUTIL 6 : Commande SSH générique ─────────────────────────────
         if nom_outil == "run_ssh_command":
             if not _LINUX_TOOLS_DISPONIBLE:
                 return "[SIMULATION] run_ssh_command — linux_tools non disponible"
@@ -450,7 +417,6 @@ def _appeler_mcp(nom_outil: str, arguments: dict) -> str:
             except Exception as e:
                 return f"Erreur SSH: {e}"
 
-        # ── OUTIL 7 : Métriques système via SSH ───────────────────────────
         if nom_outil == "get_system_metrics":
             if not _LINUX_TOOLS_DISPONIBLE:
                 return "[SIMULATION] get_system_metrics — linux_tools non disponible"
@@ -466,7 +432,6 @@ def _appeler_mcp(nom_outil: str, arguments: dict) -> str:
             except Exception as e:
                 return f"Erreur métriques SSH: {e}"
 
-        # ── OUTIL 8 : Orchestration pipeline ─────────────────────────────
         if nom_outil == "orchestrer_pipeline":
             contexte = arguments.get("contexte", "")
             return f"Orchestration OK. Contexte: {contexte[:200]}"
@@ -512,9 +477,6 @@ class AlarmeInput(BaseModel):
         return str(v)
 
 class ActionCorrectiveInput(BaseModel):
-    # [B1] field_validator : coerce dict/list → JSON string avant validation Pydantic.
-    # Optional[Any] génère un anyOf sans properties → Groq rejette avec 400.
-    # Le validator convertit silencieusement avant que Groq ne voie le schema.
     anomalie_json: Optional[str] = Field(
         default=None,
         description="Anomalie détectée en JSON string avec type, IP, sévérité"
@@ -523,7 +485,6 @@ class ActionCorrectiveInput(BaseModel):
     @field_validator("anomalie_json", mode="before")
     @classmethod
     def coerce_to_str(cls, v):
-        """Convertit dict/list → JSON string avant validation, transparent pour Groq."""
         if isinstance(v, (dict, list)):
             return json.dumps(v, ensure_ascii=False)
         if v is None:
@@ -581,10 +542,7 @@ class OutilLireLogs(BaseTool):
 
 
 class OutilAnalyserLogs(BaseTool):
-    """
-    [B4] Version enrichie du binôme : 8 types d'attaques détectés
-    au lieu d'une simple analyse erreurs/warnings/SSH.
-    """
+    """[B4] Version enrichie : 8 types d'attaques détectés."""
     name: str = "analyser_logs"
     description: str = (
         "Analyse les logs et compte tous les types d'attaques et événements suspects : "
@@ -739,6 +697,22 @@ class OutilDeclencherAlarme(BaseTool):
                 "nom_fichier": f"alarme_{ip_safe}.json",
                 "type":        "alarme",
             })
+
+            # ✅ [FIX-1] broadcast_alarm correctement indenté dans la boucle for alarme
+            # ✅ [FIX-3] server_id propagé depuis l'alarme vers le WebSocket
+            try:
+                from api_auth import broadcast_alarm
+                broadcast_alarm({
+                    "type":      type_alarme,
+                    "source_ip": ip,
+                    "severity":  severite,
+                    "message":   message,
+                    "engine":    type_alarme.split("-")[0].split("_")[0].upper(),
+                    "server_id": str(alarme.get("server_id") or alarme.get("Serveur") or "auth"),
+                })
+            except Exception as e:
+                print(f"[WS][WARN] broadcast depuis declencher_alarme échoué: {e}")
+
             resultats.append(f"Alarme envoyée: {notification[:100]}... | S3: {result}")
 
         return "\n".join(resultats) if resultats else "Aucune alarme déclenchée."
@@ -754,11 +728,9 @@ class OutilActionCorrective(BaseTool):
     args_schema: type[BaseModel] = ActionCorrectiveInput
 
     def _run(self, anomalie_json: Optional[str] = None, **kwargs) -> str:
-        # Garde-fou : field_validator s'en occupe, mais au cas où CrewAI contourne
         if isinstance(anomalie_json, (dict, list)):
             anomalie_json = json.dumps(anomalie_json, ensure_ascii=False)
 
-        # ── Parsing JSON ou texte libre ───────────────────────────────────────
         try:
             anomalie = json.loads(anomalie_json) if anomalie_json else {}
         except Exception:
@@ -854,7 +826,7 @@ class OutilActionCorrective(BaseTool):
         action = _build_action(type_upper, ip, severite, anomalie)
 
         # ═══════════════════════════════════════════════════════════════════
-        # Phase 1 — TRAINING : apprentissage pur, aucune exécution [C3]
+        # Phase 1 — TRAINING
         # ═══════════════════════════════════════════════════════════════════
         if AGENT_MODE == "TRAINING":
             kb_key   = f"{type_anomalie} / {severite}".upper()
@@ -892,7 +864,7 @@ class OutilActionCorrective(BaseTool):
             return json.dumps(result, ensure_ascii=False, indent=2)
 
         # ═══════════════════════════════════════════════════════════════════
-        # Phase 2 — SUGGESTION : proposition, validation humaine [C5]
+        # Phase 2 — SUGGESTION
         # ═══════════════════════════════════════════════════════════════════
         if AGENT_MODE == "SUGGESTION":
             result = {
@@ -917,13 +889,13 @@ class OutilActionCorrective(BaseTool):
             try:
                 from api_auth import broadcast_alarm
                 broadcast_alarm({
-                    "type":          "CORRECTIVE_SUGGESTION",
-                    "source_ip":     ip,
-                    "severity":      "CRITICAL" if str(severite).upper() == "CRITIQUE" else "HIGH",
-                    "action":        action.get("type", ""),
-                    "confidence":    confidence,
-                    "mode":          AGENT_MODE,
-                    "message":       f"[SUGGESTION] {action.get('description', '')}",
+                    "type":              "CORRECTIVE_SUGGESTION",
+                    "source_ip":         ip,
+                    "severity":          "CRITICAL" if str(severite).upper() == "CRITIQUE" else "HIGH",
+                    "action":            action.get("type", ""),
+                    "confidence":        confidence,
+                    "mode":              AGENT_MODE,
+                    "message":           f"[SUGGESTION] {action.get('description', '')}",
                     "human_insight": (
                         f"Agent suggere : {action.get('type')} | "
                         f"Confiance : {confidence:.0%} | Validation requise."
@@ -932,6 +904,29 @@ class OutilActionCorrective(BaseTool):
                 })
             except Exception as e:
                 print(f"[WS][WARN] Broadcast suggestion échoué : {e}")
+
+            # ✅ [FIX-2] POST vers /api/corrective/suggestion correctement indenté
+            # dans le bloc SUGGESTION — remplit _pending_suggestions pour le frontend
+            try:
+                import requests as _req
+                _req.post(
+                    "http://localhost:8000/api/corrective/suggestion",
+                    json={
+                        "anomaly_type": str(type_anomalie),
+                        "ip":           str(ip),
+                        "severity":     str(severite),
+                        "action_type":  str(action.get("type", "")),
+                        "command":      str(action.get("commande", "")),
+                        "description":  str(action.get("description", "")),
+                        "confidence":   float(confidence),
+                        "mode":         AGENT_MODE,
+                        "timestamp":    timestamp,
+                    },
+                    timeout=5,
+                )
+                print(f"[SUGGESTION] Enregistrée dans /api/corrective/suggestions")
+            except Exception as e:
+                print(f"[CORRECTIVE][WARN] Enregistrement suggestion échoué : {e}")
 
             # [C6] Sauvegarde S3 suggestion_log
             _appeler_mcp("sauvegarder_rapport_s3", {
@@ -942,11 +937,10 @@ class OutilActionCorrective(BaseTool):
             return json.dumps(result, ensure_ascii=False, indent=2)
 
         # ═══════════════════════════════════════════════════════════════════
-        # Phase 3 — AUTO : exécution conditionnée au confidence score
+        # Phase 3 — AUTO
         # ═══════════════════════════════════════════════════════════════════
         if AGENT_MODE == "AUTO":
 
-            # Cas 1 : confiance insuffisante → suggestion uniquement
             if confidence < CONFIDENCE_THRESHOLD_AUTO:
                 result = {
                     "mode":            "AUTO_BLOCKED",
@@ -966,21 +960,21 @@ class OutilActionCorrective(BaseTool):
                 try:
                     from api_auth import broadcast_alarm
                     broadcast_alarm({
-                        "type":          "CORRECTIVE_SUGGESTION",
-                        "source_ip":     ip,
-                        "severity":      "HIGH",
-                        "action":        action.get("type", ""),
-                        "confidence":    confidence,
-                        "mode":          "AUTO_BLOCKED",
-                        "message":       f"[AUTO-BLOQUE] {action.get('description','')}",
-                        "human_insight": f"Confiance {confidence:.0%} < seuil {CONFIDENCE_THRESHOLD_AUTO:.0%}. Validation requise.",
+                        "type":              "CORRECTIVE_SUGGESTION",
+                        "source_ip":         ip,
+                        "severity":          "HIGH",
+                        "action":            action.get("type", ""),
+                        "confidence":        confidence,
+                        "mode":              "AUTO_BLOCKED",
+                        "message":           f"[AUTO-BLOQUE] {action.get('description','')}",
+                        "human_insight":     f"Confiance {confidence:.0%} < seuil {CONFIDENCE_THRESHOLD_AUTO:.0%}. Validation requise.",
                         "suggestion_payload": result,
                     })
                 except Exception as e:
                     print(f"[WS][WARN] Broadcast auto-blocked échoué : {e}")
                 return json.dumps(result, ensure_ascii=False, indent=2)
 
-            # Cas 2 : confiance suffisante → exécution réelle
+            # Confiance suffisante → exécution réelle
             action["statut"]     = "EXÉCUTÉ"
             action["executed"]   = True
             action["timestamp"]  = timestamp
@@ -988,9 +982,8 @@ class OutilActionCorrective(BaseTool):
 
             print(f"[AUTO] {action.get('type')} | IP={ip} | confiance={confidence:.0%} | EXECUTION")
             if "commande" in action:
-                print(f"[COMMANDE]          {action['commande']}")
+                print(f"[COMMANDE] {action['commande']}")
 
-            # Blocage AWS réel via Boto3 (logique originale préservée)
             est_ssh       = "BRUTE" in type_upper or "SSH" in type_upper
             ip_specifique = ip and ip not in ("N/A", "multiple", "")
 
@@ -1033,7 +1026,6 @@ class OutilActionCorrective(BaseTool):
                     "message": "aws_security.py non importé — configurez AWS_SECURITY_GROUP_ID dans .env"
                 }
 
-            # Sérialisation et sauvegarde S3 — [C6] auto_action_log
             result = {
                 "mode":       "AUTO",
                 "phase":      "Phase 3 — Automatisation conditionnelle",
@@ -1053,10 +1045,11 @@ class OutilActionCorrective(BaseTool):
 
         # Mode inconnu → fallback sécurisé
         return json.dumps({
-            "mode":    AGENT_MODE,
-            "error":   f"Mode inconnu : {AGENT_MODE}. Valeurs acceptées : TRAINING, SUGGESTION, AUTO.",
+            "mode":     AGENT_MODE,
+            "error":    f"Mode inconnu : {AGENT_MODE}. Valeurs acceptées : TRAINING, SUGGESTION, AUTO.",
             "executed": False,
         }, indent=2)
+
 
 class OutilOrchestration(BaseTool):
     name: str = "orchestrer_pipeline"
@@ -1111,7 +1104,6 @@ outil_rapport      = OutilSauvegarderRapport()
 # 6 AGENTS SPÉCIALISÉS
 # ================================
 
-# ── Agent 1 : Collecteur ─────────────────────────────────────────────────────
 collector_agent = Agent(
     role="Collecteur de Logs",
     goal=(
@@ -1129,7 +1121,6 @@ collector_agent = Agent(
     max_iter=2,
     max_retry_limit=1,
 )
-# ── Agent 2 : Analyste ───────────────────────────────────────────────────────
 
 analyst_agent = Agent(
     role="Analyste de Logs Linux",
@@ -1147,11 +1138,10 @@ analyst_agent = Agent(
     tools=[outil_analyser],
     llm=llm_analyst,
     verbose=True,
-    max_iter=2,       
-    max_retry_limit=1, 
+    max_iter=2,
+    max_retry_limit=1,
 )
 
-# ── Agent 3 : Détecteur + Alarmes ────────────────────────────────────────────
 detector_agent = Agent(
     role="Détecteur d'Anomalies et Déclencheur d'Alarmes",
     goal=(
@@ -1170,11 +1160,10 @@ detector_agent = Agent(
     tools=[outil_anomalies, outil_alarme],
     llm=llm,
     verbose=True,
-    max_iter=1,          # [B5] Évite les boucles infinies sur le détecteur
+    max_iter=1,           # [B5] Évite les boucles infinies sur le détecteur
     max_retry_limit=1,
 )
 
-# ── Agent 4 : Correcteur [C7] — Semi-Automatique ────────────────────────────
 corrector_agent = Agent(
     role="Agent Correcteur Semi-Automatique",
     goal=(
@@ -1195,11 +1184,9 @@ corrector_agent = Agent(
     ),
     tools=[outil_correctif],
     llm=llm,
-    verbose=True
+    verbose=True,
 )
 
-
-# ── Agent 5 : Orchestrateur ──────────────────────────────────────────────────
 orchestrator_agent = Agent(
     role="Orchestrateur de Pipeline Multi-Agents",
     goal=(
@@ -1217,12 +1204,11 @@ orchestrator_agent = Agent(
         "le détecteur et le correcteur avant tout autre traitement. "
         "Tu réponds DIRECTEMENT sans utiliser d'outil externe."
     ),
-    tools=[],   # Aucun outil — évite brave_search sur Groq
+    tools=[],
     llm=llm_orchestrator,
-    verbose=True
+    verbose=True,
 )
 
-# ── Agent 6 : Rapporteur ─────────────────────────────────────────────────────
 reporter_agent = Agent(
     role="Rapporteur et Synthétiseur",
     goal=(
@@ -1238,5 +1224,5 @@ reporter_agent = Agent(
     ),
     tools=[outil_rapport],
     llm=llm,
-    verbose=True
+    verbose=True,
 )

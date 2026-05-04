@@ -12,7 +12,7 @@
 //   pipeline/latest        → PipelineLatest
 //   /health FastAPI        → HealthCheck
 //   /ws/logs WebSocket     → WsIncomingMessage
-
+//   /api/alarms/live       → LiveAlarmsResponse
 // ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -59,6 +59,16 @@ export type AlarmItem = {
   action:        AlarmAction;
   country:       string;
   failures:      number;
+  server_id?:    string;        // optionnel — présent dans les alarmes normalisées WebSocket
+  stage?:        string;        // "pass1" | "pass2" | "final" — étape du pipeline
+};
+
+
+// ─── /api/alarms/live  (ALARMS_STORE en mémoire vive) ────────────────────────
+// Retourné par GET /api/alarms/live dans api_auth.py
+export type LiveAlarmsResponse = {
+  count:  number;
+  alarms: AlarmItem[];
 };
 
 
@@ -137,6 +147,7 @@ export type HealthCheck = {
   status:                string;
   ws_clients?:           number;
   ws_endpoint?:          string;
+  alarms_count?:         number;   // ✅ NOUVEAU — exposé par la version avec ALARMS_STORE
   version?:              string;
   timestamp?:            string;
   memory_file_exists?:   boolean;
@@ -146,6 +157,7 @@ export type HealthCheck = {
 
 
 // ─── WebSocket  ws://localhost:8000/ws/logs ───────────────────────────────────
+
 export type WsAlarmMessage = {
   type:     "alarm";
   alarm:    AlarmItem;
@@ -162,15 +174,46 @@ export type WsMetricsMessage = {
   data: Partial<KpiData>;
 };
 
-export type WsPongMessage = { type: "pong" };
-export type WsHeartbeat   = { type: "heartbeat" };
-export type WsFilterAck   = { type: "filter_ack" };
+//  NOUVEAU — envoyé par le backend au nouveau client WS qui se connecte
+// Contient les N dernières alarmes du ALARMS_STORE (historique session courante)
+export type WsHistoryMessage = {
+  type:   "history";
+  alarms: AlarmItem[];
+  count:  number;
+};
 
+export type WsPongMessage  = { type: "pong" };
+export type WsHeartbeat    = { type: "heartbeat" };
+export type WsFilterAck    = { type: "filter_ack"; servers?: string[]; version?: number };
+
+//  suggestion du Corrective Agent
+export type CorrectiveSuggestion = {
+  suggestion_id: string;
+  anomaly_type:  string;
+  ip:            string;
+  severity:      string;
+  action_type:   string;
+  command?:      string;
+  description:   string;
+  confidence:    number;
+  mode:          string;
+  status:        "PENDING" | "APPROVED" | "REJECTED" | "MODIFIED";
+  timestamp:     string;
+};
+
+export type WsSuggestionMessage = {
+  type:       "suggestion";
+  suggestion: CorrectiveSuggestion;
+};
+
+// WsHistoryMessage ajouté à l'union — corrige ts(2367)
 export type WsIncomingMessage =
   | WsAlarmMessage
   | WsLogMessage
   | WsMetricsMessage
+  | WsHistoryMessage   
   | WsPongMessage
+  | WsSuggestionMessage
   | WsHeartbeat
   | WsFilterAck;
 
@@ -182,7 +225,8 @@ export type IdpsWsCallbacks = {
   onDisconnect?: () => void;
 };
 
-// Helpers de narrowing — utilisés dans useIdpsDashboard.ts
+// ─── Helpers de narrowing — utilisés dans useIdpsDashboard.ts ─────────────────
 export const isAlarmMsg   = (m: WsIncomingMessage): m is WsAlarmMessage   => m.type === "alarm";
 export const isLogMsg     = (m: WsIncomingMessage): m is WsLogMessage     => m.type === "log";
 export const isMetricsMsg = (m: WsIncomingMessage): m is WsMetricsMessage => m.type === "metrics";
+export const isHistoryMsg = (m: WsIncomingMessage): m is WsHistoryMessage => m.type === "history";
