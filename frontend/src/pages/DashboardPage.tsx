@@ -1,14 +1,11 @@
 // src/pages/DashboardPage.tsx
-// ─────────────────────────────────────────────────────────────────────────────
-// FIXES :
-//   ✅ [FIX-1] suggestions extrait de useIdpsDashboard
-//   ✅ [FIX-2] CorrectiveAgentPanel reçoit suggestions + wsConnected
-//   ✅ [FIX-3] Import named { CorrectiveAgentPanel } au lieu de default
-//   ✅ [FIX-4] DashboardPanel reçoit suggestions
-// ─────────────────────────────────────────────────────────────────────────────
+
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+
+import MinimizationChart from '../components/dashboard/MinimizationChart';
+
 
 import { useAuth }           from "../hooks/useAuth";
 import { useIdpsDashboard }  from "../hooks/useIdpsDashboard";
@@ -134,7 +131,7 @@ export const DashboardPage = () => {
 
   const [theme, toggleTheme] = useDarkMode();
   const [section, setSection] = useState<Section>("dashboard");
-  const [selectedServers, setSelectedServers] = useState<string[]>(["auth", "web"]);
+  const [selectedServers, setSelectedServers] = useState<string[]>([]);
 
   const handleServersChange = useCallback((servers: string[]) => {
     setSelectedServers(servers);
@@ -183,27 +180,27 @@ export const DashboardPage = () => {
 
           <div className="main-content__scroll">
 
-            {/* ── Dashboard principal ── */}
-            {section === "dashboard" && (
-              // ✅ [FIX-4] suggestions passé à DashboardPanel
-              <DashboardPanel
-                kpis={kpis}
-                alarms={alarms}
-                engines={engines}
-                decisions={decisions}
-                sessions={sessions}
-                logLines={logLines}
-                trust={trust}
-                loading={loading}
-                wsConnected={wsConnected}
-                isLive={isLive}
-                suggestions={suggestions}
-              />
+    {section === "dashboard" && (
+              <>
+                <DashboardPanel
+                  kpis={kpis}
+                  alarms={alarms}
+                  engines={engines}
+                  decisions={decisions}
+                  sessions={sessions}
+                  logLines={logLines}
+                  trust={trust}
+                  loading={loading}
+                  wsConnected={wsConnected}
+                  isLive={isLive}
+                  suggestions={suggestions}
+                />
+                <MinimizationChart />
+              </>
             )}
-
             {/* ── Agent correcteur ── */}
             {section === "corrective" && (
-              // ✅ [FIX-2] suggestions + wsConnected passés — écran noir corrigé
+              
               <CorrectiveAgentPanel
                 suggestions={suggestions}
                 wsConnected={wsConnected}

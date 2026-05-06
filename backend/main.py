@@ -668,8 +668,8 @@ def load_logs_from_s3(prefix: str = "processed/dataset_") -> pd.DataFrame:
 
      
 
-            server_id_val = _infer_server_label(key)   # "auth"|"web"|"ftp"|"kernel"|"unknown"
-            server_name   = os.path.splitext(os.path.basename(key))[0]   # "dataset_auth_2026-03-10_06-32"
+            server_id_val = _infer_server_label(key)   
+            server_name   = os.path.splitext(os.path.basename(key))[0]   
             df_tmp["Serveur"]     = server_name      # nom lisible pour les rapports
             df_tmp["server_id"]   = server_id_val    # label métier pour les filtres API
 
@@ -1142,13 +1142,20 @@ def main() -> None:
             "drift_score":           trust_result.get("drift_score", 0.0),
             "stability":             trust_result.get("stability", "LOW"),
             "confidence_in_metrics": trust_result.get("confidence_in_metrics", 0.0),
-            # ✅ [FIX-MAIN-3] Labels métier dédupliqués (auth/web/ftp/kernel)
-            # /api/servers lit "server_ids" en priorité 2 et "serveurs_actifs" en priorité 1
-            "server_ids":            server_ids_in_df,           # ["auth","web","ftp"] ✅
-            "serveurs_actifs":       server_ids_in_df,           # même chose — priorité 1 dans /api/servers
-            # Noms bruts originaux (pour le rapport S3 et les logs)
-            "data_sources":          data_sources_raw,           # ["auth_2026-03-10","web_2026-03-10"]
+          
+            "server_ids":            server_ids_in_df,        
+            "serveurs_actifs":       server_ids_in_df,        
+         
+            "data_sources":          data_sources_raw,     
         })
+        try:
+            from src.dashboard_api import _push_minimization_point
+            _push_minimization_point(
+                nb_alarmes=len(alarmes_final) if hasattr(alarmes_final, "__len__") else 0,
+                health_score=metrics_summary.get("health_score", 100.0),
+                )
+        except Exception as e:
+            print(f"[WARN] push minimization: {e}")
 
         try:
             _req.post("http://localhost:8000/api/invalidate-cache", timeout=2)

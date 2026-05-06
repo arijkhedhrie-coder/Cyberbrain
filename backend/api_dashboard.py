@@ -541,3 +541,86 @@ def api_backtest_history() -> list:
         mem = _load_memory()
         return list(reversed(mem.get("backtest_history", [])))
     return _cached("backtest_history", load)
+"""
+AJOUT À dashboard_api.py (Flask, port 5000)
+===========================================
+Endpoint : GET /api/minimization
+Retourne une timeseries du nb d'alarmes par session pour construire
+la "courbe de minimisation" du risque.
+
+COMMENT L'INTÉGRER :
+  1. Coller ce bloc dans dashboard_api.py (après les imports existants)
+  2. Redémarrer le Flask
+
+DÉPENDANCES : déjà présentes dans ton projet (json, datetime, Path, Flask)
+"""
+
+# ── Import à ajouter si pas encore présent ──────────────────────────────────
+from collections import deque
+from datetime import datetime
+from pathlib import Path
+import json
+
+# ── Buffer en mémoire : 20 derniers points temps-réel ───────────────────────
+# (remis à zéro au redémarrage du Flask — c'est voulu pour le temps-réel)
+_MINIMIZATION_BUFFER: deque = deque(maxlen=20)
+
+
+def _push_minimization_point(nb_alarmes: int, health_score: float = 100.0) -> None:
+    """
+    À appeler depuis agents.py (ou main.py) à la fin de chaque pipeline.
+    Exemple d'appel depuis agents.py :
+        from src.dashboard_api import _push_minimization_point
+        _push_minimization_point(nb_alarmes=len(alarmes_final), health_score=metrics_summary["health_score"])
+    """
+    _MINIMIZATION_BUFFER.append({
+        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "alarmes":   nb_alarmes,
+        "risque":    max(0, round(100 - health_score, 1)),  # % risque résiduel
+    })
+
+
+def _build_minimization_from_memory() -> list:
+    """
+    Si le buffer est vide (Flask vient de démarrer),
+    reconstitue la courbe depuis long_term_memory.json
+    en lisant les 20 dernières sessions.
+    """
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    memory_file  = PROJECT_ROOT / "long_term_memory.json"
+
+    if not memory_file.exists():
+        return []
+
+    try:
+        with open(memory_file, "r", encoding="utf-8", errors="replace") as f:
+            mem = json.load(f)
+
+        sessions = mem.get("sessions", [])[-20:]  # 20 dernières
+        series = []
+
+        for s in sessions:
+            donnees = s.get("donnees", {})
+            nb_alarmes   = donnees.get("nb_alarmes_final", donnees.get("nb_anomalies", 0))
+            health_score = donnees.get("health_score", 100.0)
+            date_str     = s.get("date", "")[:19].replace("T", " ")  # "2026-03-10 14:23:01"
+
+            # Garde juste HH:MM pour l'affichage
+            try:
+                t_label = datetime.fromisoformat(s.get("date", "")).strftime("%H:%M")
+            except Exception:
+                t_label = date_str[-8:-3] if len(date_str) >= 8 else "?"
+
+            series.append({
+                "timestamp": t_label,
+                "alarmes":   int(nb_alarmes) if nb_alarmes is not None else 0,
+                "risque":    max(0, round(100 - float(health_score or 100), 1)),
+            })
+
+        return series
+
+    except Exception as e:
+        print(f"[MINIMIZATION] Erreur lecture mémoire : {e}")
+        return []
+
+

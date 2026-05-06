@@ -1,0 +1,100 @@
+.live-feed {
+  position: relative;
+  border-radius: 10px;
+  padding: 12px;
+  overflow: hidden;
+
+  /* Dégradé bleu → violet */
+  background: linear-gradient(135deg, #0f172a, #1e1b4b, #312e81);
+
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Glow animé subtil */
+.live-feed::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    120deg,
+    transparent,
+    rgba(59, 130, 246, 0.15),
+    rgba(139, 92, 246, 0.15),
+    transparent
+  );
+  animation: live-glow 6s linear infinite;
+  pointer-events: none;
+}
+
+/* Animation du dégradé */
+@keyframes live-glow {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Header */
+.live-feed-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  color: #e5e7eb;
+}
+
+/* Item */
+.live-feed-item {
+  display: flex;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: #d1d5db;
+}
+
+.live-feed-item:last-child {
+  border-bottom: none;
+}
+
+/* Pulse sur les nouvelles alarmes */
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-top: 4px;
+  animation: pulse-dot 1.5s infinite;
+}
+
+@keyframes pulse-dot {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.6); opacity: 0.5; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Texte secondaire */
+.live-muted {
+  color: #9ca3af;
+  font-size: 10px;
+}
+
+/* Badge WS */
+.ws-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ws-on {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.ws-off {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}

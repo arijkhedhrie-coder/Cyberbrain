@@ -1,0 +1,2 @@
+{"timestamp": "2026-05-04T17:10:29.518408", "anomaly_type": "BRUTE-FORCE SSH", "original_action": "BLOCAGE_IP_AWS_SECGROUP", "decision": "MODIFY", "admin_note": null, "modified_cmd": "iptables -A INPUT -s 192.168.100.20 -j DROP"}
+{"timestamp": "2026-05-04T17:11:34.625291", "anomaly_type": "BRUTE-FORCE SSH", "original_action": "BLOCAGE_IP_AWS_SECGROUP", "decision": "REJECT", "admin_note": null, "modified_cmd": null}

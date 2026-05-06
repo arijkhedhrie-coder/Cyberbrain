@@ -7,6 +7,8 @@
 import type { FC } from "react";
 import type { AlarmItem } from "../../types/idps";
 
+import '../../style/LiveAlarmFeed.css';
+
 interface Props {
   alerts:      AlarmItem[];
   wsConnected: boolean;   // contrôle la couleur du badge

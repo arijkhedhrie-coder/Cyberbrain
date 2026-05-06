@@ -1,11 +1,5 @@
 // src/hooks/useServers.ts
-// ─────────────────────────────────────────────────────────────────────────────
-// FIXES v2 :
-//   ✅ [FIX-4] Utilise /api/servers?format=rich → structure riche
-//              { id, label, display, sources }
-//   ✅ [FIX-1] Si backend retourne [] → isEmpty = true, UI affiche message clair
-//   ✅ serverLabels[] exposé pour le filtrage API (liste de strings)
-// ─────────────────────────────────────────────────────────────────────────────
+
 
 import { useState, useEffect, useCallback } from "react";
 
@@ -79,3 +73,4 @@ export function useServers() {
     isEmpty: !loading && servers.length === 0,
   };
 }
+

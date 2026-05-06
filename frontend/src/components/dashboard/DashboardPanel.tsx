@@ -41,12 +41,7 @@ const Card: FC<{ title: string; tag?: string; tagRed?: boolean; children: ReactN
 );
 
 
-const Header = () => (
-  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-    <img src={logo} alt="Cyberbrain Logo" style={{ width: 40 }} />
-    <h1 style={{ margin: 0 }}>CYBERBRAIN</h1>
-  </div>
-);
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // KPI Card row
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -282,82 +277,7 @@ const FilteredAlarmFeed: FC<{ alarms: AlarmItem[]; wsConnected: boolean }> = ({ 
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Courbe de minimisation enrichie — health score + alarmes
-// ═══════════════════════════════════════════════════════════════════════════════
 
-const MinimCurve: FC<{ sessions: SessionSummary[] }> = ({ sessions }) => {
-  const [view, setView] = useState<"alarms" | "health">("alarms");
-  if (!sessions.length) return (
-    <div style={{ textAlign: "center", fontSize: 11, color: "var(--muted,#6b7280)", padding: "28px 0" }}>
-      Pas encore de sessions — lance le pipeline
-    </div>
-  );
-
-  const recent = [...sessions].reverse().slice(0, 20);
-  const vals   = recent.map(s => view === "alarms" ? s.nb_alarms_final : (s.health_score ?? 0));
-  const maxVal = Math.max(...vals, 1);
-
-  return (
-    <div>
-      {/* Toggle */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-        {(["alarms", "health"] as const).map(v => (
-          <button key={v} onClick={() => setView(v)} style={{
-            fontSize: 10, padding: "3px 10px", borderRadius: 20, border: "0.5px solid var(--border,#e5e7eb)",
-            cursor: "pointer", fontFamily: "inherit", fontWeight: 500,
-            background: view === v ? "#E1F5EE" : "transparent",
-            color:      view === v ? "#0F6E56" : "var(--muted,#6b7280)",
-          }}>
-            {v === "alarms" ? "Alarmes" : "Health score"}
-          </button>
-        ))}
-      </div>
-
-      {/* Bars */}
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 70, marginBottom: 6 }}>
-        {recent.map((s, i) => {
-          const val   = vals[i];
-          const pct   = Math.max(6, (val / maxVal) * 100);
-          const color = view === "alarms"
-            ? (val > 3 ? "#E24B4A" : val > 1 ? "#EF9F27" : "#1D9E75")
-            : (val >= 90 ? "#1D9E75" : val >= 70 ? "#EF9F27" : "#E24B4A");
-          return (
-            <div
-              key={i}
-              title={`${s.date?.slice(0, 10) || ""} — ${view === "alarms" ? `${val} alarmes` : `health ${val?.toFixed ? val.toFixed(1) : val}%`}${s.pass2_ran ? " (P2)" : ""}`}
-              style={{ height: `${pct}%`, flex: 1, borderRadius: "2px 2px 0 0", background: color, opacity: 0.85, cursor: "default", transition: "height .3s" }}
-            />
-          );
-        })}
-      </div>
-
-      {/* Légende */}
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "var(--muted,#6b7280)" }}>
-        <span>{recent.length} sessions</span>
-        {view === "alarms"
-          ? <span>max: <b style={{ color: "var(--text)" }}>{Math.max(...vals)}</b> alarmes</span>
-          : <span>moy: <b style={{ color: "var(--text)" }}>{(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)}%</b></span>
-        }
-        <span>← plus ancien · plus récent →</span>
-      </div>
-
-      {/* Taux amélioration (si ≥ 2 sessions) */}
-      {recent.length >= 2 && view === "alarms" && (() => {
-        const first = vals[0], last = vals[vals.length - 1];
-        const delta = first - last;
-        if (first === 0) return null;
-        const pct   = ((delta / first) * 100).toFixed(0);
-        const improved = delta > 0;
-        return (
-          <div style={{ marginTop: 8, fontSize: 10, padding: "4px 8px", borderRadius: 4, background: improved ? "#E1F5EE" : "#FCEBEB", color: improved ? "#0F6E56" : "#A32D2D", fontWeight: 500 }}>
-            {improved ? `↓ ${pct}% de réduction` : `↑ ${Math.abs(Number(pct))}% d'augmentation`} des alarmes sur {recent.length} sessions
-          </div>
-        );
-      })()}
-    </div>
-  );
-};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Agent workflow
@@ -558,13 +478,19 @@ export const DashboardPanel: FC<Props> = ({
   const healthColor = healthScore >= 90 ? "#0F6E56" : healthScore >= 70 ? "#854F0B" : "#A32D2D";
   const criticalCount = alarms.filter(a => a.severity === "CRITICAL").length;
   const alarmEngines  = engines.filter(e => e.status === "ALARM").length;
-
+const Header: FC = () => (
+  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+    <img src={logo} alt="Cyberbrain Logo" style={{ width: 40 }} />
+    <h1 style={{ margin: 0 }}>CYBERBRAIN</h1>
+  </div>
+);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes live-pulse{0%,100%{opacity:1}50%{opacity:.45}}`}</style>
 
       {/* ── Row 0 : KPI cards ── */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        
         <KpiCard
           label="Health score"
           value={`${healthScore.toFixed(1)}%`}
@@ -615,17 +541,17 @@ export const DashboardPanel: FC<Props> = ({
       </div>
 
       {/* ── Row 2 : Live alarms filtrées ── */}
-      <FilteredAlarmFeed alarms={alarms} wsConnected={wsConnected}/>
+      <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 12 }}>
+  <FilteredAlarmFeed alarms={alarms} wsConnected={wsConnected}/>
+  
+ <Card 
+  title="Agents CrewAI — Workflow décisions"
+  style={{ maxHeight: 300, overflowY: "auto" }}
+>
+  <AgentWorkflow decisions={decisions}/>
+</Card>
+</div>
 
-      {/* ── Row 3 : Minimisation + Agents ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.1fr", gap: 12 }}>
-        <Card title="Courbe de minimisation" tag={`${sessions.length} sessions`}>
-          <MinimCurve sessions={sessions}/>
-        </Card>
-        <Card title="Agents CrewAI — Workflow décisions">
-          <AgentWorkflow decisions={decisions}/>
-        </Card>
-      </div>
 
       {/* ── Row 4 : Terminal + Trust ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 12 }}>

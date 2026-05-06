@@ -40,16 +40,16 @@ export interface DashboardStats {
   total_events: number;
 }
 
-// ── 🔥 NOUVEAU : fetch liste serveurs dynamique ─────────────
 export const fetchServers = async (): Promise<string[]> => {
   try {
     const res = await axios.get(`${API_BASE}/api/servers`, { timeout: 3000 });
     const data = res.data;
+    // ✅ Retourne les vrais serveurs ou tableau vide — jamais de fake
     if (Array.isArray(data) && data.length > 0) return data;
-    return ["server1"]; // fallback minimal
-  } catch {
-    // Si backend absent → on retourne un serveur par défaut
-    return ["server1"];
+    return [];  // backend OK mais aucun serveur encore détecté
+  } catch (err) {
+    console.error("[fetchServers] backend indisponible:", err);
+    return [];  //  tableau vide — l'UI affichera un message explicite
   }
 };
 
@@ -66,8 +66,18 @@ export const getMockLiveMetrics = (): LiveMetrics => ({
   source: "simulation",
 });
 
-// 🔥 getMockStats accepte une liste de serveurs dynamique
-export const getMockStats = (servers: string[] = ["server1"]): DashboardStats => {
+//  getMockStats accepte une liste de serveurs dynamique
+export const getMockStats = (servers: string[] = []): DashboardStats => {
+  // Si aucun serveur connu → retourner des stats vides plutôt que des fakes
+  if (servers.length === 0) {
+    return {
+      overall_score: 0,
+      status: "NORMAL",
+      layer_scores: { post_breach: 0, privilege_escalation: 0, root_abuse: 0, behavioral_deviation: 0, combined_risk: 0 },
+      alarms: [],
+      total_events: 0,
+    };
+  }
   const alarmTypes = [
     { type: "BRUTE_FORCE_SSH",     domain: "SSH",     severite: "CRITIQUE" as const,      action: "BLOCK_24H",      score: 91.2, message: "🔴 BRUTE FORCE SSH | 143 tentatives" },
     { type: "PRIVILEGE_ESCALATION",domain: "SESSION",  severite: "CRITIQUE" as const,      action: "BLOCK_24H",      score: 76.5, message: "🟠 PRIVILEGE ESCALATION | sudo su" },
@@ -130,9 +140,10 @@ export const fetchDashboardStats = async (
       timeout: 3000,
     });
     return res.data;
-  } catch {
-    // 🔥 fallback mock dynamique — utilise les vrais serveurs si dispo
-    const knownServers = servers && servers.length > 0 ? servers : ["server1"];
+  } catch (err) {
+    console.error("[fetchDashboardStats] erreur:", err);
+    //  fallback mock uniquement avec les vrais serveurs connus
+    const knownServers = servers && servers.length > 0 ? servers : [];
     return getMockStats(knownServers);
   }
 };

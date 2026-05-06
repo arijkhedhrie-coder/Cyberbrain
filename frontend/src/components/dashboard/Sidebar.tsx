@@ -189,31 +189,11 @@ export const Sidebar: FC<Props> = ({
           countVariant="purple"
           icon={<IconCorrective active={activeSection === "corrective"} />}
         />
-        <NavBtn
-          label="Agents CrewAI"
-          tooltip="Agents CrewAI"
-          icon={<IconUser />}
-        />
-        <NavBtn
-          label="Trust Gate"
-          tooltip="Trust Gate"
-          icon={<IconStar />}
-        />
+       
 
-        <div className="sidebar__section-label">Analyse</div>
+      
 
-        <NavBtn label="Logs Pipeline" tooltip="Logs Pipeline" icon={<IconLog />} />
-        <NavBtn
-          label="Alarmes"
-          tooltip="Alarmes"
-          icon={<IconAlarm />}
-          count={sessionStats.threat === "CRITICAL" ? "!" : "0"}
-          countVariant="red"
-        />
-
-        <div className="sidebar__section-label">Configuration</div>
-
-        <NavBtn label="Parametres" tooltip="Parametres" icon={<IconSettings />} />
+    
 
         {/* ── System block ── */}
         <div className="sidebar__system">

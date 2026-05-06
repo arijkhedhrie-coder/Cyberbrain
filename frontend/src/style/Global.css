@@ -37,10 +37,11 @@
   /* Text */
   --text:           #e8f0ff;
   --text-primary:   #e8f0ff;
-  --text-secondary: #3b82f6;
-  --text-tertiary:  rgba(255,255,255,0.35);
-  --muted:          rgba(255,255,255,0.45);
-  --text-muted:     rgba(255,255,255,0.45);
+
+--text-secondary: #60a5fa;
+--text-tertiary:  #33c6c3;
+--muted:          #37e5e5;
+--text-muted:     #2dbaba;
 
   /* Accents */
   --purple:        #6c5ce7;
