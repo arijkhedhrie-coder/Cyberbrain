@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { API_BASE } from "./authApi";
+import axios from "axios";
 
 // ── Types des messages WebSocket ─────────────────────────────────────────────
 
@@ -165,3 +166,8 @@ constructor(callbacks: IdpsWsCallbacks) {
     }, 5_000); // réessaie toutes les 5s
   }
 }
+const FLASK_BASE = "http://localhost:5000";
+export const restartPipeline = async (): Promise<{ status: string; message: string }> => {
+  const res = await axios.post(`${FLASK_BASE}/api/pipeline/restart`);
+  return res.data;
+};

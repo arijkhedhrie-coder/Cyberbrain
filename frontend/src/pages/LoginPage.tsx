@@ -3,7 +3,8 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { loginRequest } from "../api/authApi";
-import "./LoginPage.css";
+import "../style/LoginPage.css";
+
 
 export const LoginPage = () => {
   const { login } = useAuth();
@@ -227,7 +228,15 @@ export const LoginPage = () => {
               </label>
               <div className="input-border" />
             </div>
-
+<div className="forgot-password">
+  <button
+    type="button"
+    onClick={() => navigate("/forgot-password")}
+    className="forgot-link"
+  >
+    Mot de passe oublié ?
+  </button>
+</div>
             {error && (
               <div className="error-message">
                 <svg viewBox="0 0 24 24" fill="none">

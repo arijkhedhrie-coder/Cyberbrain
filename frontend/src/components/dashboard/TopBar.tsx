@@ -4,21 +4,22 @@ import '../../style/Topbar.css';
 import { DarkModeToggle } from "./DarkModeToggle";
 import type { Theme } from "../../hooks/useDarkMode";
 
-// ✅ FIX [C1] : "corrective" ajouté au type de section
+
 type Section = "dashboard" | "track" | "corrective";
 
 interface Props {
-  section:       Section;
-  apiReady:      boolean;
-  lastUpdate:    Date | null;
-  wsConnected:   boolean;
-  isLive:        boolean;
-  theme:         Theme;
-  onToggleTheme: () => void;
-  onRelancer?:   () => void;
+  section:          Section;
+  apiReady:         boolean;
+  lastUpdate:       Date | null;
+  wsConnected:      boolean;
+  isLive:           boolean;
+  theme:            Theme;
+  onToggleTheme:    () => void;
+  onRelancer?:      () => void;
+  relancerLoading?: boolean;
 }
 
-// ✅ FIX [C2] : titre mis à jour pour inclure la section corrective
+
 const SECTION_TITLES: Record<Section, string> = {
   dashboard:  "Dashboard — Anomalies",
   track:      "Track Servers — Sélection & Colonnes",
@@ -28,6 +29,7 @@ const SECTION_TITLES: Record<Section, string> = {
 export const TopBar: FC<Props> = ({
   section, apiReady, lastUpdate, wsConnected, isLive,
   theme, onToggleTheme, onRelancer,
+  relancerLoading,
 }) => (
   <div className="topbar">
     <span className="topbar__breadcrumb">IDPS</span>
@@ -57,8 +59,16 @@ export const TopBar: FC<Props> = ({
       {/* ── Toggle dark / light ── */}
       <DarkModeToggle theme={theme} onToggle={onToggleTheme} />
 
-      <button className="topbar__btn" onClick={onRelancer}>
-        Relancer pipeline ↗
+      <button
+        className="topbar__btn"
+        onClick={onRelancer}
+        disabled={relancerLoading}
+        style={{
+          opacity: relancerLoading ? 0.6 : 1,
+          cursor:  relancerLoading ? "not-allowed" : "pointer",
+        }}
+      >
+        {relancerLoading ? "Relance en cours…" : "Relancer pipeline ↗"}
       </button>
     </div>
   </div>

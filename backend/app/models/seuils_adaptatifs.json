@@ -1,0 +1,23 @@
+{
+  "Nombre_Tentatives": 20.0,
+  "Nombre_Erreurs": 200.0,
+  "cpu_usage": 85.0,
+  "mem_usage": 90.0,
+  "web_threshold": 30.0,
+  "ftp_threshold": 15.0,
+  "_updated_at": "2026-05-08T18:26:14.605157",
+  "_version_id": "20260508_182614_421109",
+  "_gate_result": {
+    "accepted": true,
+    "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+    "old_fp_rate": 0.0,
+    "new_fp_rate": 0.0,
+    "delta": 0.0
+  },
+  "_sources": {
+    "fp_rate": 0.0,
+    "from_action_stats": false,
+    "from_dynamic_kb": false,
+    "aggressivity": 0.5
+  }
+}

@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 
 import MinimizationChart from '../components/dashboard/MinimizationChart';
 
+import { restartPipeline } from "../api/idpsDashboardApi";
 
 import { useAuth }           from "../hooks/useAuth";
 import { useIdpsDashboard }  from "../hooks/useIdpsDashboard";
@@ -14,7 +15,7 @@ import { useDarkMode }       from "../hooks/useDarkMode";
 import { Sidebar }              from "../components/dashboard/Sidebar";
 import { TopBar }               from "../components/dashboard/TopBar";
 import { DashboardPanel }       from "../components/dashboard/DashboardPanel";
-import { CorrectiveAgentPanel } from "../components/dashboard/CorrectiveAgentPanel"; // ✅ FIX-3 named import
+import { CorrectiveAgentPanel } from "../components/dashboard/CorrectiveAgentPanel";
 import { TrackServersPanel }    from "../components/dashboard/TrackServersPanel";
 
 import "../style/global.css";
@@ -133,11 +134,25 @@ export const DashboardPage = () => {
   const [section, setSection] = useState<Section>("dashboard");
   const [selectedServers, setSelectedServers] = useState<string[]>([]);
 
+  const [relancerLoading, setRelancerLoading] = useState(false);
+
+const handleRelancer = useCallback(async () => {
+  if (relancerLoading) return;
+  setRelancerLoading(true);
+  try {
+    await restartPipeline();
+    setTimeout(() => window.location.reload(), 3000);
+  } catch (err) {
+    console.error("[RELANCER] Erreur:", err);
+  } finally {
+    setRelancerLoading(false);
+  }
+}, [relancerLoading]);
+
   const handleServersChange = useCallback((servers: string[]) => {
     setSelectedServers(servers);
   }, []);
 
-  // ✅ [FIX-1] suggestions ajouté à la déstructuration
   const {
     apiReady, loading, lastUpdate,
     kpis, alarms, engines, decisions,
@@ -168,15 +183,17 @@ export const DashboardPage = () => {
 
         <div className="main-content">
 
-          <TopBar
-            section={section}
-            apiReady={apiReady}
-            lastUpdate={lastUpdate}
-            wsConnected={wsConnected}
-            isLive={isLive}
-            theme={theme}
-            onToggleTheme={toggleTheme}
-          />
+         <TopBar
+  section={section}
+  apiReady={apiReady}
+  lastUpdate={lastUpdate}
+  wsConnected={wsConnected}
+  isLive={isLive}
+  theme={theme}
+  onToggleTheme={toggleTheme}
+  onRelancer={handleRelancer}      
+  relancerLoading={relancerLoading} 
+/>
 
           <div className="main-content__scroll">
 

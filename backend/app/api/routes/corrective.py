@@ -250,7 +250,7 @@ def get_stats() -> dict:
 
     memory_stats = {}
     try:
-        from backend.app.ai.agents.memory import (
+        from app.ai.agents.memory import (
        charger_memoire, sauvegarder_memoire,
        enregistrer_stat_action, update_knowledge_base,  # ← AJOUTER
    )
@@ -326,34 +326,11 @@ def _log_training_feedback(suggestion: dict, decision: str, note: str = None,
         pass
 
 
-from backend.app.ai.agents.memory import charger_memoire, sauvegarder_memoire, enregistrer_stat_action
+from app.ai.agents.memory import charger_memoire, sauvegarder_memoire, enregistrer_stat_action
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# FIX 2 — corrective_api.py : brancher update_knowledge_base()
-#
-# PROBLÈME ACTUEL :
-#   learn_from_feedback() dans corrective_api.py met à jour good_actions,
-#   bad_actions, modified_actions — MAIS n'appelle jamais update_knowledge_base()
-#   donc la KB dynamique (dynamic_kb dans long_term_memory.json) reste vide.
-#   La fonction update_knowledge_base() existe dans memory.py mais n'est
-#   jamais appelée.
-#
-# SOLUTION : ajouter l'appel à update_knowledge_base() dans learn_from_feedback().
-#
-# COMMENT L'INTÉGRER :
-#   Dans corrective_api.py, remplacez la fonction learn_from_feedback()
-#   par la version ci-dessous. L'import de update_knowledge_base est à
-#   ajouter à la ligne existante :
-#     from src.agents.memory import charger_memoire, sauvegarder_memoire, enregistrer_stat_action
-#   → devient :
-#     from src.agents.memory import (
-#         charger_memoire, sauvegarder_memoire,
-#         enregistrer_stat_action, update_knowledge_base
-#     )
-# ═══════════════════════════════════════════════════════════════════════════
 
-from backend.app.ai.agents.memory import (
+from app.ai.agents.memory import (
     charger_memoire,
     sauvegarder_memoire,
     enregistrer_stat_action,
@@ -443,7 +420,7 @@ def learn_from_feedback(decision: str, suggestion: dict, modified_command: str =
 
     except Exception as e:
         print(f"[WARN] learn_from_feedback: {e}")
-
+        
 def _broadcast_corrective_result(suggestion: dict, result: str, status: str) -> None:
     try:
         from api_auth import broadcast_alarm

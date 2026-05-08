@@ -1,0 +1,9 @@
+{
+  "arij": {
+    "username": "arij",
+    "email": "arij.khedhrie@gmail.com",
+    "hashed_password": "$2b$12$lzqo/CCDuALk0RU7oA9nYePzvOrEY0ZwAw8F2FsCed1Q6kEo.eCW2",
+    "role": "admin",
+    "created_at": "2026-05-08T00:06:41.719401+00:00"
+  }
+}

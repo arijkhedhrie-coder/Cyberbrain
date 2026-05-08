@@ -1,15 +1,5 @@
 // src/hooks/useWebSocket.ts
-// ─────────────────────────────────────────────────────────────────────────────
-// Hook WebSocket CORRIGÉ — remplace l'ancienne version isolée
-//
-// PROBLÈMES RÉSOLUS :
-//   ❌ Avant : hook isolé, non connecté à selectedServers, aucun filtre envoyé
-//   ✅ Après : envoie { type:"filter", servers } dès l'ouverture + à chaque
-//             changement de sélection, version anti-doublons incluse
-//
-// USAGE :
-//   const { logs, alarms, connected } = useWebSocket(WS_URL, selectedServers);
-// ─────────────────────────────────────────────────────────────────────────────
+
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { AlarmItem } from "../types/idps";   // ← source unique des types
