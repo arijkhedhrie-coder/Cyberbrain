@@ -5,8 +5,8 @@
   "mem_usage": 90.0,
   "web_threshold": 30.0,
   "ftp_threshold": 15.0,
-  "_updated_at": "2026-05-08T18:26:14.605157",
-  "_version_id": "20260508_182614_421109",
+  "_updated_at": "2026-05-09T12:03:14.833916",
+  "_version_id": "20260509_120314_818584",
   "_gate_result": {
     "accepted": true,
     "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",

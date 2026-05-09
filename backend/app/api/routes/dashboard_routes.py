@@ -30,8 +30,8 @@ def _cached(key: str, loader, ttl: int = _CACHE_TTL):
     return data
 
 # ── Chemins ───────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parents[3]   # .../backend/
-MEMORY_FILE  = PROJECT_ROOT / "long_term_memory.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]   
+MEMORY_FILE  = PROJECT_ROOT / "app" / "long_term_memory.json"
 OUTPUT_DIR   = PROJECT_ROOT / "app" / "output"
 
 # ── Fonctions utilitaires ─────────────────────────────────────
@@ -70,7 +70,7 @@ def _latest_jsonl() -> list:
 
 def _get_event(events: list, event_type: str) -> dict:
     for e in events:
-        if isinstance(e, dict) and e.get("event") == event_type:
+        if isinstance(e, dict) and e.get("event_type") == event_type:
             return e
     return {}
 
@@ -103,8 +103,10 @@ def _build_kpis(events: list, memory: dict) -> dict:
         "entropy":               _as_float_or_none(metrics.get("entropy")),
         "trust_score":           _as_float_or_none(trust_ev.get("confidence")),
         "trust_label":           trust_ev.get("label", ""),
-        "lines_analyzed":        int(metrics.get("lines_analyzed", 0) or last.get("lines_analyzed", 0)),
-        "dedup_count":           int(metrics.get("dedup_count", 0) or last.get("dedup_count", 0)),
+        "row_count":      int(metrics.get("row_count", 0) or last.get("lines_analyzed", 0)),
+        "deduped_count":  int(metrics.get("dedup_count", 0) or last.get("dedup_count", 0)),
+        "lines_analyzed": int(metrics.get("row_count", 0) or last.get("lines_analyzed", 0)),
+        "dedup_count":    int(metrics.get("dedup_count", 0) or last.get("dedup_count", 0)),
     }
 
 def _build_alarms(memory: dict) -> list:
@@ -145,7 +147,7 @@ def _build_decisions(events: list, memory: dict) -> list:
     """Extrait les décisions agents depuis les events JSONL."""
     decisions = []
     for e in events:
-        if isinstance(e, dict) and e.get("event") in (
+        if isinstance(e, dict) and e.get("event_type") in (
             "DYNAMIC_CONFIG_DEFAULT", "DYNAMIC_CONFIG_APPLIED", "AGENTS_COMPLETE"
         ):
             decisions.append(e)
@@ -157,7 +159,7 @@ def _build_log_lines(events: list) -> list:
     for e in events:
         if not isinstance(e, dict):
             continue
-        ev = e.get("event", "")
+        ev = e.get("event_type", "")
         ts = e.get("ts", e.get("timestamp", ""))
         msg = e.get("message") or e.get("msg") or ev
         if msg:
@@ -195,6 +197,7 @@ def _build_data_quality(events: list) -> dict:
     }
 
 # ── Router ────────────────────────────────────────────────────
+
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
 # ── Mapping label frontend → moteurs backend ──────────────────

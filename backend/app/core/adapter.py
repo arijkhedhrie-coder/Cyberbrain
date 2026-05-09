@@ -476,34 +476,41 @@ def _normalize_format_b(
     strict:  bool,
     tracker: ErrorTracker,
 ) -> pd.DataFrame:
-    """
-    Normalize friend's collected dataset format.
-    Real timestamps are buried inside the 'detail' column.
-    """
     df = df.copy()
 
     detail_str = df["detail"].astype(str)
     source_str = df["source_log"].astype(str)
 
-    # Vectorized extraction — no row loop [C2]
-    iso_ts    = _extract_iso_ts_series(detail_str)
-    apache_ts = _extract_apache_ts_series(detail_str)
-
-    auth_mask   = source_str.str.lower() == "auth.log"
-    apache_mask = source_str.str.lower().str.contains("apache", na=False)
-
-    combined_ts                               = pd.Series(index=df.index, dtype=object)
-    combined_ts[auth_mask]                    = iso_ts[auth_mask]
-    combined_ts[apache_mask & ~auth_mask]     = apache_ts[apache_mask & ~auth_mask]
-    still_null                                = combined_ts.isna()
-    combined_ts[still_null]                   = iso_ts[still_null].fillna(apache_ts[still_null])
-
-    df["timestamp"] = _to_datetime64(combined_ts)
+    # ── PRIORITÉ : utiliser la colonne timestamp si elle existe déjà ──
+    if "timestamp" in df.columns:
+        df["timestamp"] = _to_datetime64(df["timestamp"])
+        still_bad = df["timestamp"].isna().sum()
+        if still_bad > 0:
+            iso_ts    = _extract_iso_ts_series(detail_str)
+            apache_ts = _extract_apache_ts_series(detail_str)
+            fallback  = iso_ts.fillna(apache_ts)
+            df["timestamp"] = df["timestamp"].fillna(_to_datetime64(fallback))
+    else:
+        iso_ts    = _extract_iso_ts_series(detail_str)
+        apache_ts = _extract_apache_ts_series(detail_str)
+        auth_mask   = source_str.str.lower() == "auth.log"
+        apache_mask = source_str.str.lower().str.contains("apache", na=False)
+        combined_ts = pd.Series(index=df.index, dtype=object)
+        combined_ts[auth_mask]                = iso_ts[auth_mask]
+        combined_ts[apache_mask & ~auth_mask] = apache_ts[apache_mask & ~auth_mask]
+        still_null = combined_ts.isna()
+        combined_ts[still_null] = iso_ts[still_null].fillna(apache_ts[still_null])
+        df["timestamp"] = _to_datetime64(combined_ts)
 
     bad_ts = int(df["timestamp"].isna().sum())
     if bad_ts:
         sample = detail_str[df["timestamp"].isna()].iloc[0] if bad_ts else ""
         tracker.record("format_b", "no_ts_in_detail", bad_ts, str(sample))
+
+    # ─────────────────────────────────────────────────────────────────
+    # ↑  BLOC DUPLIQUÉ SUPPRIMÉ ICI  ↑
+    # (apache_mask / combined_ts / bad_ts réutilisés hors scope → UnboundLocalError)
+    # ─────────────────────────────────────────────────────────────────
 
     # Single IP call site — _extract_ip_series handles validation [C3]
     existing_ip = _extract_ip_series(
@@ -513,12 +520,25 @@ def _normalize_format_b(
     df["source_ip"] = existing_ip.where(existing_ip.notna(), fallback_ip)
 
     df.rename(columns={"detail": "Content"}, inplace=True)
-    df["type_event"] = _classify_series(df["Content"], df["source_log"])  # [C2]
+
+    # ── FIX type_event : préserver la valeur CSV si déjà valide ──────
+    _VALID_TYPES = {
+        "SSH_BRUTE_FORCE", "SSH_SUCCESS", "SSH_OTHER",
+        "FTP_AUTH_FAIL", "FTP_AUTH_OK", "FTP_CONNECTION",
+        "WEB_ENUMERATION", "HTTP_REQUEST", "PORT_SCAN",
+        "KERNEL_EVENT", "SYSTEM_ERROR", "SYSTEM_WARNING",
+        "ALERT", "CRON_JOB", "SERVICE_EVENT", "FIREWALL_BLOCK",
+    }
+    existing_te  = df.get("type_event", pd.Series(dtype=str)).fillna("").astype(str)
+    valid_te_mask = existing_te.str.upper().isin(_VALID_TYPES)
+    classified   = _classify_series(df["Content"], df["source_log"])
+    df["type_event"] = existing_te.where(valid_te_mask, classified)
 
     return _check_schema(df[REQUIRED_COLUMNS].copy(), "format_b", strict)
 
-
 def _normalize_format_d(
+        
+
     df:      pd.DataFrame,
     strict:  bool,
     tracker: ErrorTracker,
