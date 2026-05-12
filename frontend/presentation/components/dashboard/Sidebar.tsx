@@ -125,6 +125,7 @@ const NavBtn: FC<NavBtnProps> = ({
 export const Sidebar: FC<Props> = ({
   activeSection,
   onSectionChange,
+  onLogout,
   sessionStats = { session: 0, logsAnalysed: 0, lastUpdate: "—", threat: "NORMAL" },
 }) => {
   const [collapsed, setCollapsed] = useState(false);
@@ -183,11 +184,6 @@ export const Sidebar: FC<Props> = ({
           countVariant="purple"
           icon={<IconCorrective active={activeSection === "corrective"} />}
         />
-       
-
-      
-
-    
 
         {/* ── System block ── */}
         <div className="sidebar__system">
@@ -208,6 +204,25 @@ export const Sidebar: FC<Props> = ({
             <span>MAJ</span>
             <span className="sidebar__system-val">{sessionStats.lastUpdate}</span>
           </div>
+
+          {/* ✅ Bouton Déconnexion */}
+          <button
+            onClick={onLogout}
+            style={{
+              marginTop: 12,
+              padding: "6px 12px",
+              borderRadius: 6,
+              background: "#E24B4A",
+              border: "none",
+              color: "white",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+              width: "100%",
+            }}
+          >
+            🚪 Déconnexion
+          </button>
         </div>
 
       </nav>

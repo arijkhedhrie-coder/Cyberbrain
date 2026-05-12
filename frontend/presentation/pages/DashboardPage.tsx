@@ -44,6 +44,8 @@ import type { EntropyPoint } from "../../shared/types/analytics";
 import "../../shared/style/global.css";
 import "../../shared/style/theme.css";
 import "../../shared/style/Sidebar.css";
+import { ChatBot } from "../components/Chat/ChatBot";
+
 
 type Section = "dashboard" | "track" | "corrective";
 
@@ -238,6 +240,8 @@ export const DashboardPage = () => {
   // ─────────────────────────────────────────────────────────────
   return (
     <>
+    
+    <ChatBot />
       {theme === "dark" && <StarField />}
 
       <div className="page-shell">

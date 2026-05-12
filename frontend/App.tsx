@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./presentation/components/ProtectedRoute";
 import { LoginPage } from "./presentation/pages/LoginPage";
 import { DashboardPage } from "./presentation/pages/DashboardPage";
 import { ForgotPasswordPage } from "./presentation/pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "./presentation/pages/ResetPasswordPage";
 import "./shared/style/Global.css";
 
 function App() {
@@ -22,8 +23,9 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="*" element={<Navigate to="/login" replace />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </BrowserRouter>
       </WebSocketProvider>

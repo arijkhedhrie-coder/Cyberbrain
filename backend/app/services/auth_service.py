@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes.auth import router as auth_router
 from app.api.routes.dashboard_routes import router as dashboard_router
 from app.api.routes.corrective import corrective_router
+from app.api.routes.chat import router as chat_router
 
 from collections import deque
 
@@ -22,7 +23,7 @@ ALARMS_STORE: deque = deque(maxlen=500)
 app = FastAPI(title="IDPS Dashboard API", version="2.0")
 
 app.include_router(auth_router)
-
+app.include_router(chat_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
