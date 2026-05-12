@@ -4,8 +4,6 @@ import {
   fetchEntropyHistory, fetchAttackHeatmap, fetchRadarEngines,
   fetchThresholdHistory, fetchRiskMinimization, fetchPipelineMetrics,
   fetchConfusionMetrics,
-  mockEntropyHistory, mockHeatmap, mockRadarEngines,
-  mockThresholds, mockRiskMinimization, mockPipelineStages, mockConfusionMetrics,
 } from "../../infrastructure/api/analyticsApi";
 import type {
   EntropyPoint, AttackHeatmapCell, RadarEngineData,
@@ -27,13 +25,13 @@ export interface AnalyticsViewModel {
 }
 
 export function useAnalyticsViewModel(token?: string): AnalyticsViewModel {
-  const [entropy, setEntropy] = useState<EntropyPoint[]>(mockEntropyHistory());
-  const [heatmap, setHeatmap] = useState<AttackHeatmapCell[]>(mockHeatmap());
-  const [radars, setRadars] = useState<RadarEngineData[]>(mockRadarEngines());
-  const [thresholds, setThresholds] = useState<ThresholdSnapshot[]>(mockThresholds());
-  const [riskCurve, setRiskCurve] = useState<RiskMinimizationPoint[]>(mockRiskMinimization());
-  const [pipeline, setPipeline] = useState<PipelineStage[]>(mockPipelineStages());
-  const [confusion, setConfusion] = useState<ConfusionMetrics | null>(mockConfusionMetrics());
+  const [entropy, setEntropy] = useState<EntropyPoint[]>([]);
+  const [heatmap, setHeatmap] = useState<AttackHeatmapCell[]>([]);
+  const [radars, setRadars] = useState<RadarEngineData[]>([]);
+  const [thresholds, setThresholds] = useState<ThresholdSnapshot[]>([]);
+  const [riskCurve, setRiskCurve] = useState<RiskMinimizationPoint[]>([]);
+  const [pipeline, setPipeline] = useState<PipelineStage[]>([]);
+  const [confusion, setConfusion] = useState<ConfusionMetrics | null>(null);
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {

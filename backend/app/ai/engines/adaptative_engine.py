@@ -423,10 +423,13 @@ class DynamicConfig:
         ssh_high_risk_threshold: int = 38,
         ssh_med_risk_threshold: int = 25,
         web_high_risk_threshold: int = 55,
+        web_med_risk_threshold: int = 30,
         ftp_high_risk_threshold: int = 55,
-        ftp_med_risk_threshold: int = 40,
+        ftp_med_risk_threshold: int = 30,
         kernel_high_risk_threshold: int = 50,
-        correlation_window_min: int = 15,
+        session_high_risk_threshold: int = 50,
+        session_med_risk_threshold: int = 25,
+        correlation_window_min: int = 30,
         escalate_ips: list = None,
         suppress_ips: list = None,
         rerun_engines: list = None,
@@ -437,9 +440,12 @@ class DynamicConfig:
         self.ssh_high_risk_threshold = ssh_high_risk_threshold
         self.ssh_med_risk_threshold = ssh_med_risk_threshold
         self.web_high_risk_threshold = web_high_risk_threshold
+        self.web_med_risk_threshold = web_med_risk_threshold
         self.ftp_high_risk_threshold = ftp_high_risk_threshold
         self.ftp_med_risk_threshold = ftp_med_risk_threshold
         self.kernel_high_risk_threshold = kernel_high_risk_threshold
+        self.session_high_risk_threshold = session_high_risk_threshold
+        self.session_med_risk_threshold = session_med_risk_threshold
         self.correlation_window_min = correlation_window_min
         self.escalate_ips = escalate_ips or []
         self.suppress_ips = suppress_ips or []
@@ -452,12 +458,15 @@ class DynamicConfig:
     def default(cls) -> "DynamicConfig":
         return cls(
             ssh_high_risk_threshold=38,
-            ssh_med_risk_threshold=25,
+            ssh_med_risk_threshold=22,
             web_high_risk_threshold=55,
+            web_med_risk_threshold=30,
             ftp_high_risk_threshold=55,
-            ftp_med_risk_threshold=40,
+            ftp_med_risk_threshold=30,
             kernel_high_risk_threshold=50,
-            correlation_window_min=15,
+            session_high_risk_threshold=50,
+            session_med_risk_threshold=25,
+            correlation_window_min=30,
             escalate_ips=[],
             suppress_ips=[],
             rerun_engines=[],
@@ -474,14 +483,18 @@ class DynamicConfig:
         if not data:
             return cls.default()
 
+        # Safe extraction with defaults
         return cls(
             ssh_high_risk_threshold=data.get("ssh_high_risk_threshold", 38),
-            ssh_med_risk_threshold=data.get("ssh_med_risk_threshold", 25),
+            ssh_med_risk_threshold=data.get("ssh_med_risk_threshold", 22),
             web_high_risk_threshold=data.get("web_high_risk_threshold", 55),
+            web_med_risk_threshold=data.get("web_med_risk_threshold", 30),
             ftp_high_risk_threshold=data.get("ftp_high_risk_threshold", 55),
-            ftp_med_risk_threshold=data.get("ftp_med_risk_threshold", 40),
+            ftp_med_risk_threshold=data.get("ftp_med_risk_threshold", 30),
             kernel_high_risk_threshold=data.get("kernel_high_risk_threshold", 50),
-            correlation_window_min=data.get("correlation_window_min", 15),
+            session_high_risk_threshold=data.get("session_high_risk_threshold", 50),
+            session_med_risk_threshold=data.get("session_med_risk_threshold", 25),
+            correlation_window_min=data.get("correlation_window_min", 30),
             escalate_ips=data.get("escalate_ips", []),
             suppress_ips=data.get("suppress_ips", []),
             rerun_engines=data.get("rerun_engines", []),
@@ -495,9 +508,12 @@ class DynamicConfig:
             "ssh_high_risk_threshold": self.ssh_high_risk_threshold,
             "ssh_med_risk_threshold": self.ssh_med_risk_threshold,
             "web_high_risk_threshold": self.web_high_risk_threshold,
+            "web_med_risk_threshold": self.web_med_risk_threshold,
             "ftp_high_risk_threshold": self.ftp_high_risk_threshold,
             "ftp_med_risk_threshold": self.ftp_med_risk_threshold,
             "kernel_high_risk_threshold": self.kernel_high_risk_threshold,
+            "session_high_risk_threshold": self.session_high_risk_threshold,
+            "session_med_risk_threshold": self.session_med_risk_threshold,
             "correlation_window_min": self.correlation_window_min,
             "escalate_ips": self.escalate_ips,
             "suppress_ips": self.suppress_ips,
@@ -512,6 +528,11 @@ class DynamicConfig:
         return (
             f"threat={self.threat_level} | "
             f"ssh_high={self.ssh_high_risk_threshold} | "
+            f"ssh_med={self.ssh_med_risk_threshold} | "
+            f"web_high={self.web_high_risk_threshold} | "
+            f"web_med={self.web_med_risk_threshold} | "
+            f"session_high={self.session_high_risk_threshold} | "
+            f"session_med={self.session_med_risk_threshold} | "
             f"confidence={self.confidence:.2f} | "
             f"reasoning={self.reasoning[:60]}"
         )
@@ -521,6 +542,16 @@ class DynamicConfig:
             self.threat_level == "NORMAL"
             and not self.escalate_ips
             and not self.suppress_ips
+            and self.ssh_high_risk_threshold == 38
+            and self.ssh_med_risk_threshold == 22
+            and self.web_high_risk_threshold == 55
+            and self.web_med_risk_threshold == 30
+            and self.ftp_high_risk_threshold == 55
+            and self.ftp_med_risk_threshold == 30
+            and self.kernel_high_risk_threshold == 50
+            and self.session_high_risk_threshold == 50
+            and self.session_med_risk_threshold == 25
+            and self.correlation_window_min == 30
         )
 
     @staticmethod

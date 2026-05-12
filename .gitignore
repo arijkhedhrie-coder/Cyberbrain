@@ -21,3 +21,7 @@ backend/data/raw/
 backend/src/models/
 # Additional cache
 prototype/backend/__pycache__/
+*.tmp
+*.bak
+backend/app/*.tmp
+backend/app/*.bak

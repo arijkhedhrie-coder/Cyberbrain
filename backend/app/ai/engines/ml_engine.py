@@ -7,10 +7,11 @@ Layer 4  — IP Persistence / Reputation      (weight  8%)
 Layer 5  — Daily Cycle Detection            (weight  5%)
 Layer 6  — Server-Wide Botnet Aggregation   (weight  8%)
 Layer 7  — Distributed Swarm Detection      (weight  8%)
-Layer 8  — IP Reputation Intelligence       (weight  8%)
+Layer 8  — Lightweight Reputation Heuristics (weight  8%)
 Layer 9  — ASN / Network Block Clustering   (weight  6%)
 Layer 10 — Geo + Time Behavior Analysis     (weight  5%)
-+ Isolation Forest (200 estimators)
+
++ Isolation Forest (200 estimators) as score booster
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 from __future__ import annotations
@@ -31,7 +32,17 @@ except Exception:
 
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-WHITELIST           = ['127.0.0.1', '10.0.0.1', '192.168.1.1']
+WHITELIST_IPS       = ['127.0.0.1', '10.0.0.1', '192.168.1.1']
+# Removed '192.168.' from subnets to avoid whitelisting all 192.168.x.x addresses
+WHITELIST_SUBNETS   = ['10.', '172.16.', '172.17.', '172.18.', '172.19.',
+                       '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.',
+                       '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.']
+TRUSTED_USERS       = ['backup', 'monitoring', 'ansible', 'zabbix', 'nagios', 'prometheus']
+TRUSTED_ASN_BLOCKS  = ['34.', '35.', '104.', '130.']
+
+# Service account modifier: only reduce the timing family (regular automation)
+SERVICE_ACCOUNT_TIMING_MODIFIER = 0.6
+
 HIGH_RISK_THRESHOLD = 38
 MED_RISK_THRESHOLD  = 22
 MIN_FAILURES_LAYER4 = 3
@@ -63,6 +74,20 @@ GEO_MAP = {
 HIGH_RISK_COUNTRIES = {'China', 'Korea', 'Russia', 'Vietnam', 'Brazil', 'Taiwan'}
 
 
+# ── Whitelist helpers ──────────────────────────────────────────────────────────
+def is_whitelisted_ip(ip: str) -> bool:
+    return ip in WHITELIST_IPS
+
+def is_whitelisted_subnet(ip: str) -> bool:
+    return any(ip.startswith(sub) for sub in WHITELIST_SUBNETS)
+
+def is_trusted_asn_block(ip: str) -> bool:
+    return any(ip.startswith(block) for block in TRUSTED_ASN_BLOCKS)
+
+def is_service_account(username: str) -> bool:
+    return username in TRUSTED_USERS
+
+
 # ── Extraction helpers ─────────────────────────────────────────────────────────
 
 def extract_ip(content: str):
@@ -83,23 +108,33 @@ def extract_username(content: str) -> str:
     return 'unknown'
 
 
-# ── Layer 1 ────────────────────────────────────────────────────────────────────
+# ── Layer 1 (optimised rolling window) ─────────────────────────────────────────
 
 def layer1_rate(grp: pd.DataFrame):
     times = grp['timestamp'].sort_values()
-    windows = {
-        '1min': pd.Timedelta('1min'),
-        '5min': pd.Timedelta('5min'),
-        '1h':   pd.Timedelta('60min'),
-        '24h':  pd.Timedelta('1440min'),
-    }
+    if len(times) < 2:
+        return 0.0, {'1min':0, '5min':0, '1h':0, '24h':0}
+    
+    # Use pandas rolling with offset windows (O(n) instead of O(n²))
+    s = pd.Series(1, index=times)
     max_counts = {}
-    for name, td in windows.items():
-        mx = 0
-        for t in times:
-            count = ((times - t).abs() <= td).sum()
-            mx = max(mx, count)
-        max_counts[name] = int(mx)
+    windows = {
+        '1min': '1min',
+        '5min': '5min',
+        '1h':   '1h',
+        '24h':  '24h',
+    }
+    for name, offset in windows.items():
+        try:
+            max_counts[name] = int(s.rolling(offset).sum().max())
+        except Exception:
+            # fallback to old method if rolling fails
+            td = pd.Timedelta(offset)
+            mx = 0
+            for t in times:
+                count = ((times - t).abs() <= td).sum()
+                mx = max(mx, count)
+            max_counts[name] = int(mx)
 
     score = min(100,
         (max_counts['1min']  / 10)  * 35 +
@@ -266,7 +301,8 @@ def layer7_swarm_score(ip: str, grp: pd.DataFrame, swarm_ctx: dict) -> float:
     merged_density    = grp[['w10']].drop_duplicates().merge(density, on='w10', how='left').fillna(0)
     max_density_ratio = merged_density['density_ratio'].max()
     spike_score       = min(100, (max_density_ratio / 3) * 100)
-    target_username   = grp['username'].mode().iloc[0] if len(grp) > 0 else 'unknown'
+    mode_series = grp['username'].dropna().mode()
+    target_username = mode_series.iloc[0] if not mode_series.empty else "unknown"
     user_row          = ug[ug['username'] == target_username]
     global_ips        = int(user_row['global_unique_ips'].values[0]) if len(user_row) > 0 else 1
     username_conc_score = min(100, (global_ips / 10) * 100)
@@ -277,7 +313,7 @@ def layer7_swarm_score(ip: str, grp: pd.DataFrame, swarm_ctx: dict) -> float:
     return round(score, 2)
 
 
-# ── Layer 8 ────────────────────────────────────────────────────────────────────
+# ── Layer 8 (Lightweight Reputation Heuristics) ───────────────────────────────
 
 def layer8_reputation_score(ip: str) -> tuple:
     score = 15
@@ -288,6 +324,8 @@ def layer8_reputation_score(ip: str) -> tuple:
         for p in prefixes:
             if ip.startswith(p):
                 return 65.0, f'HOSTING:{provider}'
+    if is_trusted_asn_block(ip):
+        return min(score, 20), 'TRUSTED_ASN'
     if ABUSEIPDB_API_KEY:
         try:
             import urllib.request
@@ -375,49 +413,54 @@ def layer10_geo_score(ip: str, grp: pd.DataFrame,
     return round(score, 2), country
 
 
-# ── Main IDPS Pipeline ─────────────────────────────────────────────────────────
+# ── Main IDPS Pipeline (Hierarchical Families + ISO score boost) ──────────────
 
 def run_idps(
     df: pd.DataFrame,
     high_risk_threshold: float | None = None,
-    med_risk_threshold:  float | None = None,
+    med_risk_threshold: float | None = None,
 ) -> pd.DataFrame:
     """
-    Full 10-layer IDPS pipeline.
-    Output schema (Phase 1 standard):
-      source_ip, weighted_risk_score, action, risk_level,
-      features (JSON dict), first_seen, last_seen,
-      + all individual score columns for backward compatibility.
-
-    Args:
-        high_risk_threshold: Override for BLOCK_24H threshold (default: module HIGH_RISK_THRESHOLD = 38).
-        med_risk_threshold:  Override for WATCHLIST threshold (default: module MED_RISK_THRESHOLD = 22).
+    Full 10‑layer IDPS pipeline with hierarchical risk families.
+    Isolation Forest only boosts scores, never overrides thresholds.
     """
     _high = high_risk_threshold if high_risk_threshold is not None else HIGH_RISK_THRESHOLD
-    _med  = med_risk_threshold  if med_risk_threshold  is not None else MED_RISK_THRESHOLD
-    df_ssh = df[
-        df['Content'].str.contains(
-            'authentication failure|check pass', case=False, na=False
-        )
-    ].copy()
-    df_ssh['source_ip'] = df_ssh['Content'].apply(extract_ip)
+    _med  = med_risk_threshold  if med_risk_threshold is not None else MED_RISK_THRESHOLD
+
+    # ── FILTER (hybrid: type_event OR Content regex) ──────────────────────────
+    SSH_REGEX = r"authentication failure|check pass|failed password|invalid user|login incorrect"
+    ssh_mask = (
+        df["type_event"].isin(["SSH_BRUTE_FORCE", "SSH_FAILED"])
+        | df["Content"].str.contains(SSH_REGEX, case=False, na=False)
+    )
+    df_ssh = df[ssh_mask].copy()
     df_ssh = df_ssh.dropna(subset=['timestamp', 'source_ip'])
     df_ssh = df_ssh.sort_values('timestamp').reset_index(drop=True)
 
-    if df_ssh.empty:
+    # Debug prints (optional, keep for now)
+    print("\n🔍 [DEBUG 1] SSH rows entering engine:", len(df_ssh))
+    if not df_ssh.empty:
+        print(df_ssh[['type_event', 'source_ip']].head())
+    else:
+        print("   ❌ EMPTY – filtering still broken!")
         return pd.DataFrame()
 
-    df_ssh['username'] = df_ssh['Content'].apply(extract_username)
+    if 'username' not in df_ssh.columns:
+        df_ssh['username'] = None
 
-    server_ctx              = build_server_context(df_ssh)
-    swarm_ctx               = build_swarm_context(df_ssh)
-    asn_global, asn_hourly  = build_asn_context(df_ssh)
+    # Context building
+    server_ctx               = build_server_context(df_ssh)
+    swarm_ctx                = build_swarm_context(df_ssh)
+    asn_global, asn_hourly   = build_asn_context(df_ssh)
     ip_country_df, geo_hourly = build_geo_context(df_ssh)
 
     records = []
+
+    # ── GROUP BY IP ───────────────────────────────────────────────────────────
     for ip, grp in df_ssh.groupby('source_ip'):
         grp = grp.sort_values('timestamp')
 
+        # Individual layer scores
         rate_score, rate_windows = layer1_rate(grp)
         acc_score                = layer2_accounts(grp, df_ssh)
         time_score               = layer3_timing(grp)
@@ -429,111 +472,160 @@ def run_idps(
         asn_score                = layer9_asn_score(ip, grp, asn_global, asn_hourly)
         geo_score, country       = layer10_geo_score(ip, grp, ip_country_df, geo_hourly)
 
+        # ── Hierarchical family aggregation ──────────────────────────────────
+        volume_family      = rate_score
+        timing_family      = np.mean([time_score, cycle_score])
+        reputation_family  = np.mean([rep_score, rep8_score, asn_score])
+        distributed_family = np.mean([botnet_score, swarm_score])
+        geo_family         = geo_score
+
+        # ── Service account adjustment (only timing family) ──────────────────
+        username_mode = grp['username'].mode().iloc[0] if not grp['username'].mode().empty else ''
+        if is_service_account(username_mode):
+            timing_family *= SERVICE_ACCOUNT_TIMING_MODIFIER
+
+        # Baseline weighted score (no ML yet)
         weighted = round(
-            rate_score   * 0.25 + acc_score    * 0.15 +
-            time_score   * 0.12 + rep_score    * 0.08 +
-            cycle_score  * 0.05 + botnet_score * 0.08 +
-            swarm_score  * 0.08 + rep8_score   * 0.08 +
-            asn_score    * 0.06 + geo_score    * 0.05, 2
+            volume_family      * 0.25 +
+            timing_family      * 0.20 +
+            reputation_family  * 0.20 +
+            distributed_family * 0.20 +
+            geo_family         * 0.05,
+            2
         )
 
-        risk_level = ('HIGH'   if weighted >= _high else
-                      'MEDIUM' if weighted >= _med  else 'LOW')
+        # ── Apply whitelist (full bypass) ────────────────────────────────────
+        if is_whitelisted_ip(ip) or is_whitelisted_subnet(ip):
+            weighted = 0.0
 
-        # ── Standard features dict (Phase 1) ─────────────────────────────
+        # ── Features dict (will be updated with ISO later) ───────────────────
         features = {
-            'engine':                'ssh_ml',
-            'attack_vector':         'SSH',
-            'rate':                  rate_score,
-            'username_targeting':    acc_score,
-            'timing_pattern':        time_score,
-            'ip_persistence':        rep_score,
-            'daily_cycle':           cycle_score,
-            'botnet_aggregation':    botnet_score,
-            'swarm_detection':       swarm_score,
-            'ip_reputation_l8':      rep8_score,
-            'ip_reputation_label':   rep8_label,
-            'asn_cluster':           asn_score,
-            'geo_risk':              geo_score,
-            'country':               country,
-            'total_failures':        len(grp),
-            'max_per_1min':          rate_windows['1min'],
-            'max_per_5min':          rate_windows['5min'],
-            'max_per_1h':            rate_windows['1h'],
-            'max_per_24h':           rate_windows['24h'],
-            'iso_anomaly_flag':      0,   # filled in post-loop
-            'iso_anomaly_score':     0.0,
+            'engine': 'ssh_ml',
+            'attack_vector': 'SSH',
+            'rate': rate_score,
+            'username_targeting': acc_score,
+            'timing_pattern': time_score,
+            'ip_persistence': rep_score,
+            'daily_cycle': cycle_score,
+            'botnet_aggregation': botnet_score,
+            'swarm_detection': swarm_score,
+            'ip_reputation_l8': rep8_score,
+            'ip_reputation_label': rep8_label,
+            'asn_cluster': asn_score,
+            'geo_risk': geo_score,
+            'country': country,
+            'total_failures': len(grp),
+            'max_per_1min': rate_windows['1min'],
+            'max_per_5min': rate_windows['5min'],
+            'max_per_1h': rate_windows['1h'],
+            'max_per_24h': rate_windows['24h'],
+            'iso_anomaly_flag': 0,
+            'iso_anomaly_score': 0.0,
         }
 
         records.append({
-            # ── Standard cross-engine columns ─────────────────────────────
-            'source_ip':             ip,
-            'weighted_risk_score':   weighted,
-            'risk_level':            risk_level,
-            'action':                'WHITELISTED',  # placeholder; overwritten below
-            'first_seen':            grp['timestamp'].min().strftime('%Y-%m-%d %H:%M'),
-            'last_seen':             grp['timestamp'].max().strftime('%Y-%m-%d %H:%M'),
-            # ── Individual scores (backward compat) ───────────────────────
-            'total_failures':        len(grp),
-            'max_per_1min':          rate_windows['1min'],
-            'max_per_5min':          rate_windows['5min'],
-            'max_per_1h':            rate_windows['1h'],
-            'max_per_24h':           rate_windows['24h'],
-            'failed_rate_score':          rate_score,
-            'username_targeting_score':   acc_score,
-            'timing_pattern_score':       time_score,
-            'ip_reputation_score':        rep_score,
-            'cycle_detection_score':      cycle_score,
-            'botnet_aggregation_score':   botnet_score,
-            'swarm_detection_score':      swarm_score,
-            'ip_reputation_score_l8':     rep8_score,
-            'ip_reputation_label':        rep8_label,
-            'asn_cluster_score':          asn_score,
-            'geo_risk_score':             geo_score,
-            'country':                    country,
-            'features':                   features,
+            'source_ip': ip,
+            'weighted_risk_score': weighted,
+            'risk_level': 'LOW',      # temporary
+            'action': 'WHITELISTED',  # temporary
+            'first_seen': grp['timestamp'].min().strftime('%Y-%m-%d %H:%M'),
+            'last_seen': grp['timestamp'].max().strftime('%Y-%m-%d %H:%M'),
+            'total_failures': len(grp),
+            'max_per_1min': rate_windows['1min'],
+            'max_per_5min': rate_windows['5min'],
+            'max_per_1h': rate_windows['1h'],
+            'max_per_24h': rate_windows['24h'],
+            'failed_rate_score': rate_score,
+            'username_targeting_score': acc_score,
+            'timing_pattern_score': time_score,
+            'ip_reputation_score': rep_score,
+            'cycle_detection_score': cycle_score,
+            'botnet_aggregation_score': botnet_score,
+            'swarm_detection_score': swarm_score,
+            'ip_reputation_score_l8': rep8_score,
+            'ip_reputation_label': rep8_label,
+            'asn_cluster_score': asn_score,
+            'geo_risk_score': geo_score,
+            'country': country,
+            'features': features,
         })
 
     feat_df = pd.DataFrame(records).sort_values('weighted_risk_score', ascending=False).reset_index(drop=True)
 
-    # ── Isolation Forest ───────────────────────────────────────────────────────
+    # ── ISOLATION FOREST (only boosts score, no hard escalation) ──────────────
     ml_cols = [
         'failed_rate_score', 'username_targeting_score', 'timing_pattern_score',
         'ip_reputation_score', 'cycle_detection_score', 'botnet_aggregation_score',
         'swarm_detection_score', 'ip_reputation_score_l8', 'asn_cluster_score',
         'geo_risk_score', 'total_failures',
     ]
+
     if len(feat_df) >= 5 and _SKLEARN_AVAILABLE:
-        X        = feat_df[ml_cols].fillna(0)
+        X = feat_df[ml_cols].fillna(0)
         X_scaled = MinMaxScaler().fit_transform(X)
-        iso      = IsolationForest(contamination=0.2, random_state=42, n_estimators=200)
-        iso_flags  = (iso.fit_predict(X_scaled) == -1).astype(int)
+        iso = IsolationForest(contamination=0.2, random_state=42, n_estimators=200)
+        iso_flags = (iso.fit_predict(X_scaled) == -1).astype(int)
         iso_scores = iso.decision_function(X_scaled).round(4)
-        feat_df['iso_anomaly_flag']  = iso_flags
+
+        feat_df['iso_anomaly_flag'] = iso_flags
         feat_df['iso_anomaly_score'] = iso_scores
-        # Back-fill into features dict
-        for i, row in feat_df.iterrows():
-            row['features']['iso_anomaly_flag']  = int(iso_flags[i])
-            row['features']['iso_anomaly_score']  = float(iso_scores[i])
+
+        # Apply score boost (no hard escalation)
+        for i in range(len(feat_df)):
+            if iso_flags[i] == 1:
+                boost = abs(iso_scores[i]) * 15
+                feat_df.at[i, 'weighted_risk_score'] = min(100.0, feat_df.at[i, 'weighted_risk_score'] + boost)
+            # Store in features dict
+            feat_df.at[i, 'features']['iso_anomaly_flag'] = int(iso_flags[i])
+            feat_df.at[i, 'features']['iso_anomaly_score'] = float(iso_scores[i])
     else:
-        feat_df['iso_anomaly_flag']  = 0
+        feat_df['iso_anomaly_flag'] = 0
         feat_df['iso_anomaly_score'] = 0.0
 
-    # ── Decision engine ────────────────────────────────────────────────────────
+    # ── Risk level and action decision (pure threshold, no ISO override) ──────
     def decide(row):
-        if row['source_ip'] in WHITELIST:
+        ip = row['source_ip']
+        if is_whitelisted_ip(ip) or is_whitelisted_subnet(ip):
             return 'WHITELISTED'
-        if row['weighted_risk_score'] >= _high:
+        score = row['weighted_risk_score']
+        if score >= _high:
             return 'BLOCK_24H'
-        if row['weighted_risk_score'] >= _med:
+        if score >= _med:
             return 'WATCHLIST_30MIN'
         return 'MONITOR'
 
+    def risk_level(row):
+        ip = row['source_ip']
+        if is_whitelisted_ip(ip) or is_whitelisted_subnet(ip):
+            return 'WHITELISTED'
+        score = row['weighted_risk_score']
+        if score >= _high:
+            return 'HIGH'
+        if score >= _med:
+            return 'MEDIUM'
+        return 'LOW'
+
     feat_df['action'] = feat_df.apply(decide, axis=1)
+    feat_df['risk_level'] = feat_df.apply(risk_level, axis=1)
+
+    # Debug prints (kept for compatibility)
+    print("\n🔍 [DEBUG 2] Real attack IP test:")
+    for test_ip in ['192.168.100.20', '192.168.56.103']:
+        row = feat_df[feat_df['source_ip'] == test_ip]
+        if not row.empty:
+            print(f"   IP {test_ip}: score={row.iloc[0]['weighted_risk_score']}, action={row.iloc[0]['action']}")
+        else:
+            print(f"   IP {test_ip}: NOT FOUND")
+
+    alarm_df = feat_df[feat_df["action"] != "MONITOR"]
+    print(f"\n🚨 [ALARM CHECK] Total IPs with action != MONITOR: {len(alarm_df)}")
+    if len(alarm_df) > 0:
+        print(alarm_df[['source_ip', 'weighted_risk_score', 'action']].head())
+
     return feat_df
 
 
-# ── Model performance ──────────────────────────────────────────────────────────
+# ── Model performance (unchanged) ─────────────────────────────────────────────
 
 def get_model_performance(feat_df: pd.DataFrame) -> dict:
     if len(feat_df) < 2:

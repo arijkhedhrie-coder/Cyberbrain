@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   fetchLiveMetrics,
   fetchDashboardStats,
-  getMockLiveMetrics,
-  getMockStats,
+  EMPTY_LIVE_METRICS,
+  EMPTY_DASHBOARD_STATS,
   type LiveMetrics,
   type DashboardStats,
   type Alert,
@@ -29,8 +29,8 @@ export interface DashboardData {
 }
 
 export const useDashboardData = (token?: string): DashboardData => {
-  const [metrics, setMetrics] = useState<LiveMetrics>(getMockLiveMetrics());
-  const [stats, setStats] = useState<DashboardStats>(getMockStats());
+  const [metrics, setMetrics] = useState<LiveMetrics>(EMPTY_LIVE_METRICS);
+  const [stats, setStats] = useState<DashboardStats>(EMPTY_DASHBOARD_STATS);
   const [sshHistory, setSshHistory] = useState<SshDataPoint[]>([]);
   const [isLive, setIsLive] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
@@ -53,7 +53,7 @@ export const useDashboardData = (token?: string): DashboardData => {
   const refresh = useCallback(async () => {
     const [liveData, statsData] = await Promise.all([
       fetchLiveMetrics(),
-      token ? fetchDashboardStats(token) : Promise.resolve(getMockStats()),
+      token ? fetchDashboardStats(token) : Promise.resolve(EMPTY_DASHBOARD_STATS),
     ]);
 
     setMetrics(liveData);

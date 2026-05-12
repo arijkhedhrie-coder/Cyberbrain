@@ -92,39 +92,42 @@ else:
 # CORRECTION 2 : api_auth n'existe pas à la racine — les fonctions broadcast
 # sont définies dans app/api/routes/auth.py
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# WebSocket bridge
+# ─────────────────────────────────────────────────────────────────────────────
 try:
-    from app.api.routes.auth import broadcast_alarm, broadcast_log, broadcast_metrics
-    from app.api.routes.auth import _event_loop as _ws_event_loop
-    if _ws_event_loop is None or _ws_event_loop.is_closed():
-        raise RuntimeError("Event loop non disponible — main.py hors uvicorn")
+    from app.core.websocket_broadcast import broadcast_alarm, broadcast_log, broadcast_metrics
     WS_ENABLED = True
-    LOG.info("[WS] broadcast direct chargé (même processus que uvicorn)")
-except Exception as _ws_err:
+    LOG.info("[WS] broadcast functions loaded from central module")
+except ImportError as _ws_import_err:
     WS_ENABLED = False
+    LOG.warning("[WS] Central broadcast module not available: %s", _ws_import_err)
+
+    # Optional HTTP fallback – disabled by default (set WS_FALLBACK_ENABLED=true to enable)
+    FALLBACK_ENABLED = os.getenv("WS_FALLBACK_ENABLED", "false").lower() == "true"
+
+    def _http_post(endpoint: str, data: dict) -> None:
+        if not FALLBACK_ENABLED:
+            return
+        try:
+            import requests as _r
+            _r.post(f"http://localhost:8000/api/internal/{endpoint}", json=data, timeout=2)
+        except Exception as e:
+            LOG.warning("[WS] HTTP fallback to %s failed: %s", endpoint, e)
 
     def broadcast_alarm(raw_alarm: dict, stage: str = "pass1", server_id: str = "server1") -> None:
-        try:
-            import requests as _r
-            _r.post(
-                "http://localhost:8000/api/internal/broadcast-alarm",
-                json={"alarm": raw_alarm, "stage": stage, "server_id": server_id},
-                timeout=2,
-            )
-        except Exception:
-            pass
+        _http_post("broadcast-alarm", {"alarm": raw_alarm, "stage": stage, "server_id": server_id})
 
     def broadcast_log(data: dict) -> None:
-        pass
+        _http_post("broadcast-log", data)
 
     def broadcast_metrics(data: dict) -> None:
-        try:
-            import requests as _r
-            _r.post("http://localhost:8000/api/internal/broadcast-metrics", json=data, timeout=2)
-        except Exception:
-            pass
+        _http_post("broadcast-metrics", data)
 
-    LOG.warning("[WS] mode processus séparé — broadcast via HTTP fallback (%s)", _ws_err)
-
+    if FALLBACK_ENABLED:
+        LOG.info("[WS] HTTP fallback enabled (endpoints must exist in FastAPI).")
+    else:
+        LOG.info("[WS] No fallback – broadcasts will be ignored in this process.")
 # ─────────────────────────────────────────────────────────────────────────────
 # Imports métier
 # ─────────────────────────────────────────────────────────────────────────────
@@ -850,11 +853,55 @@ def _run_dynamic_config(log: SessionLogger, agent_inputs: dict) -> DynamicConfig
             verbose=True,
         )
         out = crew.kickoff(inputs=agent_inputs)
-        cfg = DynamicConfig.from_json(str(out))
+
+        # Step 1: extract a dict from the crew output
+        if isinstance(out, dict):
+            config_dict = out
+        else:
+            raw = str(out).strip()
+            # Remove possible markdown code fences
+            import re
+            if raw.startswith("```json"):
+                raw = re.sub(r"^```json\s*", "", raw)
+                raw = re.sub(r"\s*```$", "", raw)
+            # Find the first { and last }
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                json_str = raw[start:end+1]
+                config_dict = json.loads(json_str)
+            else:
+                raise ValueError(f"No JSON object found in output: {raw[:200]}")
+        
+        # Step 2: ensure required fields exist
+        defaults = DynamicConfig.default()
+        for key in ["ssh_high_risk_threshold", "ssh_med_risk_threshold",
+                    "web_high_risk_threshold", "web_med_risk_threshold",
+                    "ftp_high_risk_threshold", "ftp_med_risk_threshold",
+                    "kernel_high_risk_threshold", "session_high_risk_threshold",
+                    "session_med_risk_threshold", "correlation_window_min",
+                    "escalate_ips", "suppress_ips", "rerun_engines",
+                    "threat_level", "reasoning", "confidence"]:
+            if key not in config_dict:
+                config_dict[key] = getattr(defaults, key, None)
+
+        # Step 3: create a DynamicConfig instance from the dict
+        # Use the class's constructor or a factory method.
+        # If .from_dict exists, use it; otherwise, create manually.
+        if hasattr(DynamicConfig, "from_dict"):
+            cfg = DynamicConfig.from_dict(config_dict)
+        else:
+            # Fallback: instantiate and update attributes
+            cfg = DynamicConfig.default()
+            for k, v in config_dict.items():
+                if hasattr(cfg, k):
+                    setattr(cfg, k, v)
         cfg.issued_by = "orchestrator_agent"
+        
         log.dynamic_config_issued(cfg)
         _circuit_record_success()
         return cfg
+
     except Exception as e:
         _circuit_record_fail()
         log.warning("dynamic_config", f"{type(e).__name__}: {e} — defaults")

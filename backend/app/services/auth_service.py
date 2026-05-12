@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import asyncio
 import json
 import time
@@ -12,18 +11,17 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.dashboard_routes import router as dashboard_router
 from app.api.routes.corrective import corrective_router
 
-
-
 from collections import deque
 
+# ── Central broadcaster initialisation (will be called later) ────────────────
+from app.core.websocket_broadcast import init_broadcaster
 
 ALARMS_STORE: deque = deque(maxlen=500)
 
 # ── App ───────────────────────────────────────────────────────────────────────
-
 app = FastAPI(title="IDPS Dashboard API", version="2.0")
 
-app.include_router(auth_router)  
+app.include_router(auth_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,73 +39,73 @@ app.include_router(dashboard_router)
 app.include_router(corrective_router)
 
 # ── WebSocket state ───────────────────────────────────────────────────────────
-
 connected_clients: list[WebSocket] = []
-_client_filters:   dict[WebSocket, dict] = {}
+_client_filters: dict[WebSocket, dict] = {}
 _event_loop: asyncio.AbstractEventLoop | None = None
 
-@app.get("/api/pipeline/metrics")
-def get_metrics():
-    """
-    Retourne des métriques temps réel basées sur ALARMS_STORE
-    """
 
-    alarms = list(ALARMS_STORE)
+# ── Broadcast function (must be defined before the startup event) ────────────
+async def _broadcast_raw(payload: dict) -> None:
+    if not connected_clients:
+        return
+    is_alarm = payload.get("type") == "alarm"
+    alarm_data = payload.get("alarm", {}) if is_alarm else {}
+    message = json.dumps(payload, ensure_ascii=False, default=str)
+    dead: list[WebSocket] = []
+    for client in list(connected_clients):
+        try:
+            if is_alarm:
+                cf = _client_filters.get(client, {"servers": [], "version": 0})
+                servers = cf["servers"]
+                if servers:
+                    eng = str(alarm_data.get("engine") or "").lower()
+                    srv = str(alarm_data.get("server_id") or alarm_data.get("server") or "").lower()
+                    if not any(s in eng or s in srv for s in servers):
+                        continue
+                if cf["version"] > 0:
+                    await client.send_text(
+                        json.dumps({**payload, "version": cf["version"]}, ensure_ascii=False, default=str)
+                    )
+                    continue
+            await client.send_text(message)
+        except Exception:
+            dead.append(client)
+    for c in dead:
+        if c in connected_clients:
+            connected_clients.remove(c)
+        _client_filters.pop(c, None)
 
-    current_alarms = len(alarms)
 
-    # Comptage par sévérité
-    critical = sum(1 for a in alarms if a.get("severity") == "CRITICAL")
-    high     = sum(1 for a in alarms if a.get("severity") == "HIGH")
-    medium   = sum(1 for a in alarms if a.get("severity") == "MED")
-    low      = sum(1 for a in alarms if a.get("severity") == "LOW")
+def _run_broadcast(payload: dict) -> None:
+    if _event_loop and not _event_loop.is_closed():
+        asyncio.run_coroutine_threadsafe(_broadcast_raw(payload), _event_loop)
 
-    # Score de risque pondéré
-    if current_alarms == 0:
-        risk = 0
-    else:
-        risk = int(
-            (
-                critical * 1.0 +
-                high     * 0.7 +
-                medium   * 0.4 +
-                low      * 0.1
-            ) / current_alarms * 100
-        )
 
-    return {
-        "current_alarms": current_alarms,
-        "risk": risk,
-        "breakdown": {
-            "critical": critical,
-            "high": high,
-            "medium": medium,
-            "low": low,
-        }
-    }
-    
-
+# ── Startup event (runs after the app is fully built) ────────────────────────
 @app.on_event("startup")
 async def _startup() -> None:
     global _event_loop
     _event_loop = asyncio.get_running_loop()
+
+    # Initialise the central broadcaster with our event loop and raw broadcast function
+    init_broadcaster(_event_loop, _broadcast_raw)
+    print("[WS] Broadcaster initialised – pending messages will be flushed")
+
     routes = [r.path for r in app.routes if hasattr(r, "path")]
     print(f"[API] {len(routes)} routes enregistrées : {routes}")
 
 
 # ── /health ───────────────────────────────────────────────────────────────────
-
 @app.get("/health")
 def health() -> dict:
     return {
-        "status":      "ok",
-        "ws_clients":  len(connected_clients),
+        "status": "ok",
+        "ws_clients": len(connected_clients),
         "ws_endpoint": "ws://localhost:8000/ws/logs",
     }
 
 
 # ── WebSocket /ws/logs ────────────────────────────────────────────────────────
-
 @app.websocket("/ws/logs")
 async def ws_logs(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -115,21 +113,20 @@ async def ws_logs(websocket: WebSocket) -> None:
     _client_filters[websocket] = {"servers": [], "version": 0}
     print(f"[WS] connecté — actifs : {len(connected_clients)}")
 
-    # ✅ FIX — envoyer l'historique des alarmes au nouveau client
+    # Send history of alarms to new client
     if ALARMS_STORE:
         try:
             recent = list(ALARMS_STORE)[-20:]
             await websocket.send_json({
-                "type":   "history",
+                "type": "history",
                 "alarms": recent,
-                "count":  len(recent),
+                "count": len(recent),
             })
         except Exception:
             pass
 
     try:
         while True:
-            
             try:
                 msg = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 try:
@@ -159,53 +156,48 @@ async def ws_logs(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        connected_clients.remove(websocket) if websocket in connected_clients else None
+        if websocket in connected_clients:
+            connected_clients.remove(websocket)
         _client_filters.pop(websocket, None)
         print(f"[WS] déconnecté — restants : {len(connected_clients)}")
 
 
-# ── Broadcast (appelé par main.py) ────────────────────────────────────────────
+# ── Metrics endpoint ──────────────────────────────────────────────────────────
+@app.get("/api/pipeline/metrics")
+def get_metrics() -> dict:
+    alarms = list(ALARMS_STORE)
+    current_alarms = len(alarms)
 
-async def _broadcast_raw(payload: dict) -> None:
-    
-    if not connected_clients:
-        return
-    is_alarm   = payload.get("type") == "alarm"
-    alarm_data = payload.get("alarm", {}) if is_alarm else {}
-    message    = json.dumps(payload, ensure_ascii=False, default=str)
-    dead: list[WebSocket] = []
-    for client in list(connected_clients):
-        try:
-            if is_alarm:
-                cf      = _client_filters.get(client, {"servers": [], "version": 0})
-                servers = cf["servers"]
-                if servers:
-                    # Filtre multi-critères : engine, server_id ou server
-                    eng = str(alarm_data.get("engine") or "").lower()
-                    srv = str(alarm_data.get("server_id") or alarm_data.get("server") or "").lower()
-                    # Garde l'alarme si engine OU server_id correspond à un des serveurs filtrés
-                    match = any(s in eng or s in srv for s in servers)
-                    if not match:
-                        continue
-                if cf["version"] > 0:
-                    await client.send_text(
-                        json.dumps({**payload, "version": cf["version"]}, ensure_ascii=False, default=str)
-                    )
-                    continue
-            await client.send_text(message)
-        except Exception:
-            dead.append(client)
-    for c in dead:
-        connected_clients.remove(c) if c in connected_clients else None
-        _client_filters.pop(c, None)
+    critical = sum(1 for a in alarms if a.get("severity") == "CRITICAL")
+    high = sum(1 for a in alarms if a.get("severity") == "HIGH")
+    medium = sum(1 for a in alarms if a.get("severity") == "MED")
+    low = sum(1 for a in alarms if a.get("severity") == "LOW")
 
+    if current_alarms == 0:
+        risk = 0
+    else:
+        risk = int(
+            (
+                critical * 1.0 +
+                high * 0.7 +
+                medium * 0.4 +
+                low * 0.1
+            ) / current_alarms * 100
+        )
+
+    return {
+        "current_alarms": current_alarms,
+        "risk": risk,
+        "breakdown": {
+            "critical": critical,
+            "high": high,
+            "medium": medium,
+            "low": low,
+        }
+    }
 
 
-def _run_broadcast(payload: dict) -> None:
-    if _event_loop and not _event_loop.is_closed():
-        asyncio.run_coroutine_threadsafe(_broadcast_raw(payload), _event_loop)
-
-
+# ── Helper maps & normalisation (unchanged) ───────────────────────────────────
 _SEV_MAP = {
     "CRITIQUE": "CRITICAL", "AVERTISSEMENT": "HIGH",
     "AVERTISSEMENT_MOYEN": "MED",
@@ -217,14 +209,14 @@ _ACTION_MAP = {
     "WATCHLIST": "WATCHLIST", "TRAFFIC_THROTTLE": "WATCHLIST",
     "ESCALATE": "ESCALATE", "MONITOR": "MONITOR",
 }
-_VALID_ENGINES = {"SSH","WEB","FTP","SESSION","KERNEL","PREDICTION","CORRELATION","CHAIN"}
+_VALID_ENGINES = {"SSH", "WEB", "FTP", "SESSION", "KERNEL", "PREDICTION", "CORRELATION", "CHAIN"}
 _HUMAN = {
-    "SSH":      "Repeated login failures — brute-force pattern.",
-    "WEB":      "HTTP path scanning — automated vulnerability scanner.",
-    "FTP":      "Abnormal file transfer — possible data exfiltration.",
-    "SESSION":  "Session token reuse — session compromise suspected.",
-    "KERNEL":   "Kernel error spike — system instability.",
-    "PREDICTION":"Pre-attack signals — distributed attack incoming.",
+    "SSH": "Repeated login failures — brute-force pattern.",
+    "WEB": "HTTP path scanning — automated vulnerability scanner.",
+    "FTP": "Abnormal file transfer — possible data exfiltration.",
+    "SESSION": "Session token reuse — session compromise suspected.",
+    "KERNEL": "Kernel error spike — system instability.",
+    "PREDICTION": "Pre-attack signals — distributed attack incoming.",
 }
 
 
@@ -246,49 +238,40 @@ def _normalize_alarm(raw: dict, stage: str = "pass1", server_id: str = "") -> di
         score = round(float(raw.get("score") or raw.get("score_final") or 0), 1)
     except Exception:
         score = 0.0
-    # server_id : priorité arg explicite > champ dans raw
     srv = server_id or str(raw.get("server_id") or raw.get("Serveur") or "server1")
     return {
-        "id":            str(raw.get("id") or f"ws-{uuid.uuid4().hex[:8]}-{int(time.time())}"),
-        "timestamp":     ts,
-        "type":          t.strip(),
-        "source_ip":     str(raw.get("source_ip") or raw.get("ip") or raw.get("IP_Source") or "N/A"),
-        "severity":      sev,
-        "engine":        eng,
-        "score":         score,
-        "message":       str(raw.get("message") or "")[:120],
+        "id": str(raw.get("id") or f"ws-{uuid.uuid4().hex[:8]}-{int(time.time())}"),
+        "timestamp": ts,
+        "type": t.strip(),
+        "source_ip": str(raw.get("source_ip") or raw.get("ip") or raw.get("IP_Source") or "N/A"),
+        "severity": sev,
+        "engine": eng,
+        "score": score,
+        "message": str(raw.get("message") or "")[:120],
         "human_insight": str(raw.get("human_insight") or _HUMAN.get(eng, "Anomalous activity detected.")),
-        "action":        _ACTION_MAP.get(str(raw.get("action") or "MONITOR").upper(), "MONITOR"),
-        "country":       str(raw.get("country") or "Unknown"),
-        "failures":      int(raw.get("failures") or 0),
-        "server_id":     srv,
+        "action": _ACTION_MAP.get(str(raw.get("action") or "MONITOR").upper(), "MONITOR"),
+        "country": str(raw.get("country") or "Unknown"),
+        "failures": int(raw.get("failures") or 0),
+        "server_id": srv,
     }
 
 
 def broadcast_alarm(raw_alarm: dict, stage: str = "pass1", server_id: str = "") -> None:
     try:
         normalized = _normalize_alarm(raw_alarm, stage, server_id=server_id)
-
-      
         ALARMS_STORE.append(normalized)
         print(f"[ALARMS_STORE] +1 | total={len(ALARMS_STORE)} | {normalized.get('engine')} {normalized.get('severity')}")
-
-        # Broadcast WebSocket vers tous les clients connectés
         _run_broadcast({"type": "alarm", "alarm": normalized})
-
     except Exception as e:
         print(f"[WS][WARN] broadcast_alarm: {e}")
+
+
 @app.get("/api/alarms/live")
 def get_live_alarms(limit: int = 100) -> dict:
-    """
-    Retourne les alarmes en mémoire vive (session courante).
-    Utilisé par le frontend au reconnect WebSocket ou polling.
-    Différent de /api/alarms qui lit long_term_memory.json (session passée).
-    """
     alarms = list(ALARMS_STORE)[-limit:]
     return {
-        "count":  len(alarms),
-        "alarms": list(reversed(alarms)),  # plus récentes en premier
+        "count": len(alarms),
+        "alarms": list(reversed(alarms)),
     }
 
 
@@ -306,8 +289,7 @@ def broadcast_metrics(metrics: dict) -> None:
         print(f"[WS][WARN] broadcast_metrics: {e}")
 
 
-# ── Endpoints internes pour broadcast depuis processus externe (main.py séparé) ──
-
+# ── Internal HTTP endpoints for fallback (optional) ───────────────────────────
 from pydantic import BaseModel as _BaseModel
 
 class _AlarmBroadcastPayload(_BaseModel):
@@ -315,21 +297,21 @@ class _AlarmBroadcastPayload(_BaseModel):
     stage: str = "pass1"
     server_id: str = "server1"
 
-@app.post("/api/internal/broadcast-alarm")
 
+@app.post("/api/internal/broadcast-alarm")
 async def internal_broadcast_alarm(payload: _AlarmBroadcastPayload) -> dict:
-   
     broadcast_alarm(payload.alarm, stage=payload.stage, server_id=payload.server_id)
     return {"ok": True, "store_size": len(ALARMS_STORE)}
+
 
 @app.post("/api/internal/broadcast-metrics")
 async def internal_broadcast_metrics(data: dict) -> dict:
     broadcast_metrics(data)
     return {"ok": True}
 
+
 @app.post("/api/invalidate-cache")
 async def invalidate_cache() -> dict:
-    """Invalide le cache de dashboard_api.py."""
     try:
         from dashboard_api import _cache
         _cache.clear()

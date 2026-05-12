@@ -1934,5 +1934,863 @@
       "new_fp_rate": 0.0,
       "delta": 0.0
     }
+  },
+  {
+    "version_id": "20260511_103007_571435",
+    "timestamp": "2026-05-11T10:30:07.586483",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-09T12:03:14.833916",
+      "_version_id": "20260509_120314_818584",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": 0.0,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260511_103143_013760",
+    "timestamp": "2026-05-11T10:31:43.018759",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-11T10:30:07.592993",
+      "_version_id": "20260511_103007_571435",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": 0.0,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260511_103454_901538",
+    "timestamp": "2026-05-11T10:34:54.902819",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-11T10:31:43.023685",
+      "_version_id": "20260511_103143_013760",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": 0.0,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260511_110231_016085",
+    "timestamp": "2026-05-11T11:02:31.031704",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-11T10:34:54.908837",
+      "_version_id": "20260511_103454_901538",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": 0.0,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260511_110940_280674",
+    "timestamp": "2026-05-11T11:09:40.312394",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-11T11:02:31.042799",
+      "_version_id": "20260511_110231_016085",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": 0.0,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260511_120207_868490",
+    "timestamp": "2026-05-11T12:02:07.880491",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-11T11:09:40.326547",
+      "_version_id": "20260511_110940_280674",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": 0.0,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260511_131230_888004",
+    "timestamp": "2026-05-11T13:12:30.897001",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-11T12:02:07.896490",
+      "_version_id": "20260511_120207_868490",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": 0.0,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260511_193332_495366",
+    "timestamp": "2026-05-11T19:33:32.499873",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-11T13:12:30.907003",
+      "_version_id": "20260511_131230_888004",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": 0.0,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260511_212703_861252",
+    "timestamp": "2026-05-11T21:27:03.863263",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-11T19:33:32.510567",
+      "_version_id": "20260511_193332_495366",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": 0.0,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP -2.9% → 0.0% (delta=+2.9%)",
+      "old_fp_rate": -0.029,
+      "new_fp_rate": 0.0,
+      "delta": 0.029
+    }
+  },
+  {
+    "version_id": "20260511_213659_539240",
+    "timestamp": "2026-05-11T21:36:59.541247",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-11T21:27:03.866281",
+      "_version_id": "20260511_212703_861252",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP -2.9% → 0.0% (delta=+2.9%)",
+        "old_fp_rate": -0.029,
+        "new_fp_rate": 0.0,
+        "delta": 0.029
+      },
+      "_sources": {
+        "fp_rate": -0.024,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP -2.9% → 0.0% (delta=+2.9%)",
+      "old_fp_rate": -0.029,
+      "new_fp_rate": 0.0,
+      "delta": 0.029
+    }
+  },
+  {
+    "version_id": "20260511_232251_378989",
+    "timestamp": "2026-05-11T23:22:51.394987",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-11T21:36:59.545240",
+      "_version_id": "20260511_213659_539240",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP -2.9% → 0.0% (delta=+2.9%)",
+        "old_fp_rate": -0.029,
+        "new_fp_rate": 0.0,
+        "delta": 0.029
+      },
+      "_sources": {
+        "fp_rate": -0.02,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP -2.9% → 0.0% (delta=+2.9%)",
+      "old_fp_rate": -0.029,
+      "new_fp_rate": 0.0,
+      "delta": 0.029
+    }
+  },
+  {
+    "version_id": "20260512_112648_806586",
+    "timestamp": "2026-05-12T11:26:48.817586",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-11T23:22:51.403987",
+      "_version_id": "20260511_232251_378989",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP -2.9% → 0.0% (delta=+2.9%)",
+        "old_fp_rate": -0.029,
+        "new_fp_rate": 0.0,
+        "delta": 0.029
+      },
+      "_sources": {
+        "fp_rate": -0.018,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP -2.9% → 0.0% (delta=+2.9%)",
+      "old_fp_rate": -0.029,
+      "new_fp_rate": 0.0,
+      "delta": 0.029
+    }
+  },
+  {
+    "version_id": "20260512_121204_291482",
+    "timestamp": "2026-05-12T12:12:04.293481",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-12T11:26:48.822589",
+      "_version_id": "20260512_112648_806586",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP -2.9% → 0.0% (delta=+2.9%)",
+        "old_fp_rate": -0.029,
+        "new_fp_rate": 0.0,
+        "delta": 0.029
+      },
+      "_sources": {
+        "fp_rate": -0.016,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP -2.9% → 0.0% (delta=+2.9%)",
+      "old_fp_rate": -0.029,
+      "new_fp_rate": 0.0,
+      "delta": 0.029
+    }
+  },
+  {
+    "version_id": "20260512_130413_511046",
+    "timestamp": "2026-05-12T13:04:13.514772",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-12T12:12:04.296977",
+      "_version_id": "20260512_121204_291482",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP -2.9% → 0.0% (delta=+2.9%)",
+        "old_fp_rate": -0.029,
+        "new_fp_rate": 0.0,
+        "delta": 0.029
+      },
+      "_sources": {
+        "fp_rate": -0.014,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260512_150541_292042",
+    "timestamp": "2026-05-12T15:05:41.313735",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-12T13:04:13.522408",
+      "_version_id": "20260512_130413_511046",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": -0.014,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260512_161443_841368",
+    "timestamp": "2026-05-12T16:14:43.847437",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-12T15:05:41.327319",
+      "_version_id": "20260512_150541_292042",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": -0.014,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260512_162144_880764",
+    "timestamp": "2026-05-12T16:21:44.885762",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-12T16:14:43.854010",
+      "_version_id": "20260512_161443_841368",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": -0.014,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260512_162848_192924",
+    "timestamp": "2026-05-12T16:28:48.201122",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-12T16:21:44.901763",
+      "_version_id": "20260512_162144_880764",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": -0.014,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260512_164402_186706",
+    "timestamp": "2026-05-12T16:44:02.191706",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-12T16:28:48.212579",
+      "_version_id": "20260512_162848_192924",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": -0.014,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260512_171556_243768",
+    "timestamp": "2026-05-12T17:15:56.248769",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-12T16:44:02.197705",
+      "_version_id": "20260512_164402_186706",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": -0.014,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260512_174447_704195",
+    "timestamp": "2026-05-12T17:44:47.739104",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-12T17:15:56.256128",
+      "_version_id": "20260512_171556_243768",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": -0.014,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
+  },
+  {
+    "version_id": "20260512_175845_987844",
+    "timestamp": "2026-05-12T17:58:46.057844",
+    "anciens_seuils": {
+      "Nombre_Tentatives": 20.0,
+      "Nombre_Erreurs": 200.0,
+      "cpu_usage": 85.0,
+      "mem_usage": 90.0,
+      "web_threshold": 30.0,
+      "ftp_threshold": 15.0,
+      "_updated_at": "2026-05-12T17:44:47.823472",
+      "_version_id": "20260512_174447_704195",
+      "_gate_result": {
+        "accepted": true,
+        "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+        "old_fp_rate": 0.0,
+        "new_fp_rate": 0.0,
+        "delta": 0.0
+      },
+      "_sources": {
+        "fp_rate": -0.014,
+        "from_action_stats": false,
+        "from_dynamic_kb": false,
+        "aggressivity": 0.5
+      }
+    },
+    "agent_proposal": {
+      "ssh_high": 20,
+      "web_high": 30,
+      "ftp_high": 15
+    },
+    "gate_result": {
+      "accepted": true,
+      "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
+      "old_fp_rate": 0.0,
+      "new_fp_rate": 0.0,
+      "delta": 0.0
+    }
   }
 ]

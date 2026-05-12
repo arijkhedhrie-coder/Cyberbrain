@@ -1,4 +1,4 @@
-# dashboard_routes.py
+# dashboard_routes.py (FIXED)
 # ─────────────────────────────────────────────────────────────
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from pathlib import Path
 # ── Cache ─────────────────────────────────────────────────────
 _cache: dict = {}
 _cache_lock = threading.Lock()
-_CACHE_TTL = 30  # secondes
+_CACHE_TTL = 5  # secondes – reduced from 30 for real-time endpoints
 
 def _cached(key: str, loader, ttl: int = _CACHE_TTL):
     now = time.time()
@@ -125,21 +125,28 @@ def _build_alarms(memory: dict) -> list:
     return result
 
 def _build_engine_scores(events: list, memory: dict) -> list:
-    """Construit les scores par moteur depuis les events JSONL."""
+    summary = _get_event(events, "SESSION_SUMMARY")
+    snaps = summary.get("threshold_snapshots", [])
+    thresh_p1 = snaps[0] if snaps else {}
+    thresh_p2 = snaps[1] if len(snaps) > 1 else {}
+    
     pass1 = _get_event(events, "PASS1_COMPLETE")
     by_domain = pass1.get("alarms_by_domain", {})
-
-    sessions = memory.get("sessions", [])
-    last = sessions[-1].get("donnees", {}) if sessions else {}
-
+    pass2 = _get_event(events, "PASS2_COMPLETE")
+    rerun_engines = pass2.get("engines_rerun", [])
+    
     engines = ["SSH", "WEB", "FTP", "KERNEL", "SESSION"]
-    result  = []
+    result = []
     for eng in engines:
         count = int(by_domain.get(eng, 0))
         result.append({
-            "engine": eng,
-            "alarms": count,
-            "score":  min(100, count * 5),
+            "engine":   eng,
+            "alarms":   count,
+            "score":    min(100, count * 5),
+            "pass1":    thresh_p1.get(f"{eng.lower()}_high"),
+            "pass2":    thresh_p2.get(f"{eng.lower()}_high") if thresh_p2 else None,
+            "status":   "ALARM" if count > 0 else "CLEAR",
+            "rerun_p2": eng.lower() in [e.lower() for e in rerun_engines],
         })
     return result
 
@@ -167,15 +174,25 @@ def _build_log_lines(events: list) -> list:
     return lines
 
 def _build_trust(events: list) -> dict:
-    """Extrait le trust gate depuis les events."""
     trust_ev = _get_event(events, "TRUST_COMPUTED")
     return {
-        "confidence":    _as_float_or_none(trust_ev.get("confidence")),
-        "label":         trust_ev.get("label", "UNKNOWN"),
-        "agreement":     _as_float_or_none(trust_ev.get("agreement")),
-        "fp_rate":       _as_float_or_none(trust_ev.get("fp_rate")),
-        "drift":         _as_float_or_none(trust_ev.get("drift")),
+        "confidence_in_metrics": _as_float_or_none(
+            trust_ev.get("confidence_in_metrics") or trust_ev.get("confidence")
+        ),
+        "confidence_label": trust_ev.get("confidence_label") or trust_ev.get("label", "UNKNOWN"),
+        "model_agreement":   _as_float_or_none(
+            trust_ev.get("model_agreement") or trust_ev.get("agreement")
+        ),
+        "false_positive_rate": _as_float_or_none(
+            trust_ev.get("false_positive_rate") or trust_ev.get("fp_rate")
+        ),
+        "drift_score":   _as_float_or_none(
+            trust_ev.get("drift_score") or trust_ev.get("drift")
+        ),
+        "drift_label":   trust_ev.get("drift_label", "UNKNOWN"),
+        "drift_flagged": trust_ev.get("drift_flagged", False),
         "stability":     trust_ev.get("stability", ""),
+        "signals_summary": trust_ev.get("signals_summary", ""),
         "risk_of_false": trust_ev.get("risk_of_false_decision", ""),
     }
 
@@ -304,21 +321,21 @@ def api_servers(format: str = Query(default="list")) -> list:
             if inferred:
                 labels_found.add(inferred)
 
-    if not labels_found:
-        _ENGINE_TO_LABEL_LOCAL = {
-            "SSH": "auth", "WEB": "web", "FTP": "ftp",
-            "KERNEL": "kernel", "SESSION": "kernel",
-            "PREDICTION": "kernel", "CORRELATION": "auth",
-        }
-        try:
-            all_alarms = _build_alarms(_load_memory())
-            for a in all_alarms:
-                engine = str(a.get("engine") or "").upper()
-                label  = _ENGINE_TO_LABEL_LOCAL.get(engine, "")
-                if label:
-                    labels_found.add(label)
-        except Exception as e:
-            print(f"[WARN][api_dashboard] Fallback alarmes échoué: {e}")
+    # Always add labels derived from alarm engine types, even if we already found some
+    _ENGINE_TO_LABEL_LOCAL = {
+        "SSH": "auth", "WEB": "web", "FTP": "ftp",
+        "KERNEL": "kernel", "SESSION": "kernel",
+        "PREDICTION": "kernel", "CORRELATION": "auth",
+    }
+    try:
+        all_alarms = _build_alarms(memory)
+        for a in all_alarms:
+            engine = str(a.get("engine") or a.get("domain") or "").upper()
+            label  = _ENGINE_TO_LABEL_LOCAL.get(engine, "")
+            if label:
+                labels_found.add(label)
+    except Exception as e:
+        print(f"[WARN][api_dashboard] Fallback alarmes échoué: {e}")
 
     if not labels_found:
         try:
@@ -341,18 +358,37 @@ def api_servers(format: str = Query(default="list")) -> list:
         return [{"id": l, "label": l, "display": _LABEL_DISPLAY.get(l, l), "sources": [l]} for l in ordered]
     return ordered
 
-# ── /api/kpis ─────────────────────────────────────────────────
+# ── Filtre alarmes – corrigé pour utiliser aussi "domain" ─────
+_ENGINE_TO_LABEL: dict[str, str] = {
+    "SSH": "auth", "WEB": "web", "FTP": "ftp",
+    "KERNEL": "kernel", "SESSION": "kernel",
+    "PREDICTION": "kernel", "CORRELATION": "auth",
+}
+
+def _filter_alarms_by_servers(all_alarms: list[dict], servers: list[str]) -> list[dict]:
+    servers_set = {s.lower() for s in servers}
+    result = []
+    for a in all_alarms:
+        sid = str(a.get("server_id") or "").lower()
+        if sid and sid in servers_set:
+            result.append(a)
+            continue
+        # ✅ Also fallback to domain field
+        engine = str(a.get("engine") or a.get("domain") or "").upper()
+        label  = _ENGINE_TO_LABEL.get(engine, "")
+        if label and label in servers_set:
+            result.append(a)
+    return result
+
+# ── /api/alarms, /api/kpis, /api/engine-scores with reduced TTL ─
 @router.get("/kpis")
 def api_kpis(servers: List[str] = Query(default=[])) -> dict:
     def load_all():
         return _build_kpis(_latest_jsonl(), _load_memory())
-
     if not servers:
         return _cached("kpis", load_all)
-
     engines   = _engines_for_servers(servers)
     cache_key = f"kpis_{'_'.join(sorted(servers))}"
-
     def load_filtered():
         events = _latest_jsonl()
         base   = _build_kpis(events, _load_memory())
@@ -372,31 +408,8 @@ def api_kpis(servers: List[str] = Query(default=[])) -> dict:
                 "is_velocity_spike": False,
             })
         return base
-
     return _cached(cache_key, load_filtered)
 
-# ── Filtre alarmes ─────────────────────────────────────────────
-_ENGINE_TO_LABEL: dict[str, str] = {
-    "SSH": "auth", "WEB": "web", "FTP": "ftp",
-    "KERNEL": "kernel", "SESSION": "kernel",
-    "PREDICTION": "kernel", "CORRELATION": "auth",
-}
-
-def _filter_alarms_by_servers(all_alarms: list[dict], servers: list[str]) -> list[dict]:
-    servers_set = {s.lower() for s in servers}
-    result = []
-    for a in all_alarms:
-        sid = str(a.get("server_id") or "").lower()
-        if sid and sid in servers_set:
-            result.append(a)
-            continue
-        engine = str(a.get("engine") or "").upper()
-        label  = _ENGINE_TO_LABEL.get(engine, "")
-        if label and label in servers_set:
-            result.append(a)
-    return result
-
-# ── /api/alarms ───────────────────────────────────────────────
 @router.get("/alarms")
 def api_alarms(servers: List[str] = Query(default=[])) -> list:
     def load_all():
@@ -408,7 +421,6 @@ def api_alarms(servers: List[str] = Query(default=[])) -> list:
         return _filter_alarms_by_servers(_build_alarms(_load_memory()), servers)
     return _cached(cache_key, load_filtered)
 
-# ── /api/engine-scores ────────────────────────────────────────
 @router.get("/engine-scores")
 def api_engine_scores(servers: List[str] = Query(default=[])) -> list:
     def load_all():

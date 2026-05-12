@@ -1,6 +1,3 @@
-
-
-
 import { useState, useEffect, useCallback, useRef } from "react";
 import type {
   KpiData,
@@ -20,6 +17,69 @@ import { isHistoryMsg } from "../../shared/types/idps";
 const API     = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_URL  = import.meta.env.VITE_WS_URL  || "ws://localhost:8000/ws/logs";
 const POLL_MS = 10_000;
+
+// ─── Normalisation d'une alarme brute (backend → AlarmItem) ──────────────────
+const normalizeAlarm = (a: any): AlarmItem => ({
+  id:
+    a.id ??
+    `${a.timestamp}-${a.ip}-${a.type}`,
+
+  timestamp:
+    a.timestamp ?? new Date().toISOString(),
+
+  type:
+    a.type ?? "UNKNOWN",
+
+  source_ip:
+    a.source_ip ??
+    a.ip ??
+    "unknown",
+
+  severity:
+    a.severity === "CRITICAL"
+      ? "CRITICAL"
+      : a.severite === "CRITIQUE"
+      ? "CRITICAL"
+      : a.severite === "AVERTISSEMENT"
+      ? "HIGH"
+      : "MED",
+
+  engine:
+    a.engine ??
+    a.domain ??
+    "UNKNOWN",
+
+  score:
+    Number(a.score ?? 0),
+
+  message:
+    a.message ?? "",
+
+  human_insight:
+    a.human_insight ??
+    a.message ??
+    "",
+
+  action:
+    a.action === "BLOCK_24H" ||
+    a.action === "PREEMPTIVE_BLOCK"
+      ? "BLOCK_NOW"
+      : a.action === "WATCHLIST_30MIN"
+      ? "WATCHLIST"
+      : "MONITOR",
+
+  country:
+    a.country ?? "Unknown",
+
+  failures:
+    Number(a.failures ?? 0),
+
+  server_id:
+    a.server_id,
+
+  stage:
+    a.stage,
+});
 
 // ─── Déduplication O(n) par id ────────────────────────────────────────────────
 const uniqueById = (arr: AlarmItem[]): AlarmItem[] => {
@@ -88,7 +148,6 @@ const EMPTY: IdpsDashboardState = {
 // ─── Hook principal ───────────────────────────────────────────────────────────
 export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardState => {
   const [state, setState]  = useState<IdpsDashboardState>(EMPTY);
-  const timerRef           = useRef<ReturnType<typeof setInterval> | null>(null);
   const wsRef              = useRef<WebSocket | null>(null);
   const isFirstLoad        = useRef(true);
   const filterVersion      = useRef(0);
@@ -96,9 +155,14 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
 
   const serversKey = selectedServers.slice().sort().join(",");
 
-  // ── REST fetch ─────────────────────────────────────────────────────────────
+  // ── Refs to ensure polling always uses the latest selected servers ──────
+  const serversRef = useRef(selectedServers);
+  useEffect(() => { serversRef.current = selectedServers; }, [selectedServers]);
+
+  // ── REST fetch (uses serversRef for current server list) ────────────────
   const refresh = useCallback(async () => {
     try {
+      const servers = serversRef.current;   // 👈 always fresh
       const health = await get<HealthCheck>("/health");
       if (health.status !== "ok") {
         setState(s => ({ ...s, loading: false, apiReady: false }));
@@ -107,9 +171,9 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
 
       const [kpis, alarms, engines, decisions, live, suggestions, sessions, pipeline, trust] =
         await Promise.allSettled([
-          get<KpiData>("/api/kpis",              selectedServers),
-          get<AlarmItem[]>("/api/alarms",        selectedServers),
-          get<EngineScore[]>("/api/engine-scores", selectedServers),
+          get<KpiData>("/api/kpis",              servers),
+          get<AlarmItem[]>("/api/alarms",        servers),
+          get<EngineScore[]>("/api/engine-scores", servers),
           get<AgentDecision[]>("/api/decisions"),
           get<LiveAlarmsResponse>("/api/alarms/live"),
           get<{ count: number; suggestions: CorrectiveSuggestion[] }>(
@@ -121,31 +185,51 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
         ]);
 
       const kpisVal        = kpis.status        === "fulfilled" ? kpis.value                    : null;
-      const alarmsVal      = alarms.status       === "fulfilled" ? alarms.value                  : [];
+      const alarmsVal      = alarms.status      === "fulfilled"
+        ? (alarms.value as any[]).map(normalizeAlarm)
+        : [];
       const engVal         = engines.status      === "fulfilled" ? engines.value                 : [];
-      const decVal         = decisions.status    === "fulfilled" ? decisions.value               : [];
-      const liveVal        = live.status         === "fulfilled" ? live.value.alarms             : [];
+      const decVal = decisions.status === "fulfilled"
+        ? (decisions.value as any[]).map((d: any) => ({
+            ...d,
+            confidence: d.confidence ?? d.conf ?? 1,   // ✅ fixed 10000% bug
+            severity:   d.severity ?? (d.event_type === "AGENTS_COMPLETE" ? "NORMAL" : "INFO"),
+            note:       d.note ?? d.result_excerpt?.slice(0, 200) ?? "No details",
+          }))
+        : [];
+      const liveVal        = live.status         === "fulfilled"
+        ? (live.value.alarms as any[]).map(normalizeAlarm)
+        : [];
       const suggestionsVal = suggestions.status  === "fulfilled" ? suggestions.value.suggestions : [];
       const sessVal        = sessions.status     === "fulfilled" ? sessions.value                : [];
       const pipeVal        = pipeline.status     === "fulfilled" ? pipeline.value                : null;
       const trustVal       = trust.status        === "fulfilled" ? trust.value                   : null;
-      const logLines       = pipeVal?.log_lines ?? [];
-      const latestSess     = sessVal[0];
+
+      console.log("[useIdpsDashboard] fetch results:", {
+        kpis: kpisVal, alarms: alarmsVal.length, engines: engVal.length,
+        suggestions: suggestionsVal.length, sessions: sessVal.length,
+      });
+      const logLines = pipeVal?.log_lines ?? [];
+      const latestSess = sessVal[0];
+
+      const events = pipeVal?.events ?? [];
+
+      const metricsEvent = events.find((e: any) => e.event_type === "METRICS_COMPUTED");
+      const pipelineStart = events.find((e: any) => e.event_type === "PIPELINE_START");
+      const trustEvent = events.find((e: any) => e.event_type === "TRUST_COMPUTED");
 
       setState(prev => {
-        // Fusion alarmes : REST < état WS < live (priorité max = ALARMS_STORE)
+        // ✅ Correct merge order: prev state -> REST -> live (prev gets overwritten by fresher REST)
         const mergedAlarms = (() => {
           const map = new Map<string, AlarmItem>();
-          for (const a of alarmsVal)   map.set(a.id, a);
-          for (const a of prev.alarms) map.set(a.id, a);
-          for (const a of liveVal)     map.set(a.id, a);
+          for (const a of prev.alarms) map.set(a.id, a);   // 1. previous state
+          for (const a of alarmsVal)   map.set(a.id, a);   // 2. REST (fresher)
+          for (const a of liveVal)     map.set(a.id, a);   // 3. live (most authoritative)
           return sortByTs(Array.from(map.values())).slice(0, 100);
         })();
 
-        // Sync multi-tabs : notifie les autres onglets
         localStorage.setItem("alarms_sync", JSON.stringify(mergedAlarms));
 
-        // Fusion suggestions : REST < état WS précédent
         const mergedSuggestions = (() => {
           const map = new Map<string, CorrectiveSuggestion>();
           for (const s of suggestionsVal)   map.set(s.suggestion_id, s);
@@ -153,18 +237,89 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
           return Array.from(map.values()).slice(0, 50);
         })();
 
+        const normalizedKpis: KpiData | null = kpisVal
+          ? {
+              ...kpisVal,
+              ip_entropy:
+                (metricsEvent?.ip_entropy ??
+                  kpisVal.ip_entropy ??
+                  (kpisVal as any).entropy ??
+                  null) as number | null,
+              unique_attacking_ips:
+                (metricsEvent?.unique_attacking_ips ??
+                  kpisVal.unique_attacking_ips ??
+                  0) as number,
+              attack_velocity:
+                (metricsEvent?.attack_velocity ??
+                  kpisVal.attack_velocity ??
+                  0) as number,
+              deduped_count:
+                (pipelineStart?.deduped_count ??
+                  kpisVal.deduped_count ??
+                  (kpisVal as any).dedup_count ??
+                  0) as number,
+              noise_ratio:
+                (pipelineStart?.noise_ratio ??
+                  kpisVal.noise_ratio ??
+                  null) as number | null,
+              data_quality:
+                (pipelineStart?.data_quality ??
+                  kpisVal.data_quality ??
+                  "UNKNOWN") as string,
+              row_count:
+                (pipelineStart?.row_count ??
+                  kpisVal.row_count ??
+                  (kpisVal as any).lines_analyzed ??
+                  0) as number,
+            }
+          : null;
+
+        const normalizedTrust: TrustData | null = trustVal
+          ? {
+              available: true,
+              model_agreement:
+                (trustVal.model_agreement ??
+                  (trustVal as any).agreement ??
+                  null) as number | null,
+              false_positive_rate:
+                (trustVal.false_positive_rate ??
+                  (trustVal as any).fp_rate ??
+                  null) as number | null,
+              drift_score:
+                (trustVal.drift_score ??
+                  (trustVal as any).drift ??
+                  null) as number | null,
+              drift_label:
+                (trustVal.drift_label ?? (trustVal as any).drift_label ?? "UNKNOWN") as string,
+              drift_flagged:
+                (trustVal.drift_flagged ?? false) as boolean,
+              stability:
+                (trustVal.stability ?? "UNKNOWN") as string,
+              confidence_in_metrics:
+                (trustVal.confidence_in_metrics ??
+                  (trustVal as any).confidence ??
+                  null) as number | null,
+              confidence_label:
+                (trustVal.confidence_label ??
+                  (trustVal as any).label ??
+                  "UNKNOWN") as string,
+              signals_summary:
+                (trustVal.signals_summary ?? "") as string,
+            }
+          : null;
+
         return {
           ...prev,
           apiReady:     true,
           loading:      false,
           lastUpdate:   new Date(),
-          kpis:         kpisVal,
+          kpis:         normalizedKpis,
+          trust:        normalizedTrust,
           engines:      engVal,
           decisions:    decVal,
           sessions:     sessVal,
-          trust:        trustVal,
           sessionCount: sessVal.length,
-          logsAnalysed: kpisVal?.row_count ?? 0,
+          logsAnalysed: normalizedKpis?.row_count ?? 0,
           threatLevel:  latestSess?.threat_level ?? "NORMAL",
           alarms:       mergedAlarms,
           suggestions:  mergedSuggestions,
@@ -176,76 +331,76 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
     } catch {
       setState(s => ({ ...s, loading: false, apiReady: false }));
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serversKey]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── REST polling ───────────────────────────────────────────────────────────
+  // ── Stable polling (runs once, uses ref for fresh callback) ────────────
+  const refreshRef = useRef(refresh);
+  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+
   useEffect(() => {
     if (isFirstLoad.current) setState(s => ({ ...s, loading: true }));
-    refresh();
-    timerRef.current = setInterval(refresh, POLL_MS);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [refresh]);
+    refreshRef.current();
+    const id = setInterval(() => refreshRef.current(), POLL_MS);
+    return () => clearInterval(id);
+  }, []); // ← runs only on mount/unmount
 
-  // ── WebSocket temps réel ───────────────────────────────────────────────────
+  // ── WebSocket (with destroyed flag to prevent zombie reconnects) ───────
   useEffect(() => {
+    let destroyed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) return;
+      if (destroyed || wsRef.current?.readyState === WebSocket.OPEN) return;
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
-      // ✅ ws.onopen — 3 responsabilités : connecté + recharge données + filtre
       ws.onopen = () => {
+        if (destroyed) return;
         setState(prev => ({ ...prev, wsConnected: true }));
-        refresh();
+        refreshRef.current();
+        // send current filter using the ref to avoid stale data
         ws.send(JSON.stringify({
           type:    "filter",
-          servers: selectedServers,
+          servers: serversRef.current,
           version: filterVersion.current,
         }));
       };
 
-      // ✅ ws.onmessage — tous les handlers dans le try/catch, ordre correct
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data as string) as WsIncomingMessage;
 
-          // ── filter_ack : efface uniquement les logs, PAS les alarmes ────────
           if (data.type === "filter_ack") {
             setState(prev => ({ ...prev, logLines: [] }));
             return;
           }
 
-          // ── history : historique ALARMS_STORE envoyé au connect ──────────────
           if (isHistoryMsg(data)) {
-            const histAlarms = data.alarms ?? [];
+            const histAlarms = Array.isArray(data.alarms) ? data.alarms : []; // ✅ safe guard
             if (histAlarms.length > 0) {
               setState(prev => ({
                 ...prev,
                 alarms: sortByTs(
-                  uniqueById([...histAlarms, ...prev.alarms])
+                  uniqueById([...histAlarms.map(normalizeAlarm), ...prev.alarms])
                 ).slice(0, 100),
               }));
             }
             return;
           }
 
-          // ── alarm : alarme individuelle temps réel ───────────────────────────
           if (data.type === "alarm") {
             const msgVersion = (data as { version?: number }).version;
             if (msgVersion !== undefined && msgVersion !== filterVersion.current) return;
+            const normalizedAlarm = normalizeAlarm(data.alarm);
             setState(prev => ({
               ...prev,
               lastUpdate: new Date(),
               isLive:     true,
-              alarms:     uniqueById([data.alarm, ...prev.alarms]).slice(0, 100),
+              alarms:     uniqueById([normalizedAlarm, ...prev.alarms]).slice(0, 100),
             }));
             return;
           }
 
-          // ── suggestion : action corrective en attente de validation ──────────
           if (data.type === "suggestion") {
             const incoming = (data as {
               type: "suggestion";
@@ -263,7 +418,6 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
             return;
           }
 
-          // ── log : ligne terminal pipeline ────────────────────────────────────
           if (data.type === "log") {
             if (logBuffer.current.length < 500) {
               logBuffer.current.push(data.line);
@@ -271,7 +425,6 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
             return;
           }
 
-          // ── metrics : mise à jour KPIs temps réel ────────────────────────────
           if (data.type === "metrics") {
             setState(prev => ({
               ...prev,
@@ -281,15 +434,13 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
             }));
             return;
           }
-
-          // pong / heartbeat → silencieux
-
         } catch {
-          // message non-JSON → ignoré
+          // ignore non-JSON messages
         }
       };
 
       ws.onclose = () => {
+        if (destroyed) return;
         setState(prev => ({ ...prev, wsConnected: false, isLive: false }));
         reconnectTimer = setTimeout(connect, 3000);
       };
@@ -299,7 +450,6 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
 
     connect();
 
-    // Flush buffer logs toutes les 500ms
     const logFlush = setInterval(() => {
       if (logBuffer.current.length === 0) return;
       const lines = logBuffer.current.splice(0);
@@ -310,29 +460,27 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
     }, 500);
 
     return () => {
+      destroyed = true;
       clearInterval(logFlush);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  // connexion unique au montage
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Filtre dynamique WebSocket — se déclenche quand la sélection change ────
+  // ── WebSocket filter update when servers change ───────────────────────
   useEffect(() => {
     filterVersion.current += 1;
     const version = filterVersion.current;
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type:    "filter",
-        servers: selectedServers,
+        servers: serversRef.current,       // ✅ use ref here as well
         version,
       }));
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serversKey]);
 
-  // ── Sync multi-tabs via localStorage ─────────────────────────────────────
+  // ── Sync multi-tabs via localStorage ─────────────────────────────────
   useEffect(() => {
     const handler = (e: StorageEvent) => {
       if (e.key === "alarms_sync" && e.newValue) {
@@ -345,7 +493,7 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
             ).slice(0, 100),
           }));
         } catch {
-       
+          // ignore
         }
       }
     };

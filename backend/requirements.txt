@@ -1,1 +1,11 @@
-`src/agents/agents.pyapp/ai/agents/agents.pysrc/agents/memory.pyapp/ai/agents/memory.pysrc/agents/tasks.pyapp/ai/agents/tasks.pysrc/agents/trust_gate.pyapp/ai/agents/trust_gate.py` app/ai/engines/adaptative_engine.py `src/ml_engine.pyapp/ai/engines/ml_engine.pysrc/crewai_compat.pyapp/ai/tools/crewai_compat.pysrc/adapter.pyapp/core/adapter.pyconfig/config.pyapp/core/config/config.pyhybrid_config.pyapp/core/config/hybrid_config.pyauth.pyapp/api/routes/auth.pyapi_dashboard.pyapp/api/routes/dashboard_routes.py` `corrective_api.pyapp/api/routes/corrective.py` `upload_s3.pyapp/storage/upload_s3.pyaws_security.pyapp/storage/aws_security.pymetriques.pyapp/utils/metriques.pyip_profiler.pyapp/utils/ip_profiler.pylogging_utils.pyapp/core/logging_utils.py regenerer cette version exactement`
+fastapi
+uvicorn
+crewai
+langchain
+scikit-learn
+boto3
+paramiko
+python-dotenv
+chromadb
+pydantic
+websockets

@@ -26,6 +26,7 @@ export function useServers() {
 
   const refresh = useCallback(async () => {
     try {
+      console.log("[useServers] fetching servers from:", `${API_BASE}/api/servers?format=rich`);
       // ✅ [FIX-4] Format rich pour avoir id + label + display
       const res = await fetch(`${API_BASE}/api/servers?format=rich`, {
         headers: {
@@ -33,11 +34,14 @@ export function useServers() {
         },
       });
 
+      console.log("[useServers] response status:", res.status);
+
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
 
       const data: ServerInfo[] = await res.json();
+      console.log("[useServers] servers received:", data);
 
       // ✅ [FIX-1] Si backend retourne [] → on expose la vraie situation
       // Pas de fallback statique qui masquerait le problème

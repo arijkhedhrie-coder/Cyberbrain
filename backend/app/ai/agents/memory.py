@@ -20,6 +20,7 @@ import os
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+import shutil, tempfile, os
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MEMORY_FILE  = PROJECT_ROOT / "long_term_memory.json"
@@ -62,13 +63,24 @@ def _ecrire_memoire(memoire: dict) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(memoire, f, indent=2, ensure_ascii=False)
-        os.replace(tmp_path, MEMORY_FILE)   # atomique
-    except Exception:
+        if MEMORY_FILE.exists():
+            try:
+                MEMORY_FILE.unlink()
+            except PermissionError:
+                backup = str(MEMORY_FILE) + ".bak"
+                shutil.copy2(str(MEMORY_FILE), backup)
+                MEMORY_FILE.unlink()
+        os.replace(tmp_path, MEMORY_FILE)
+    except PermissionError:
+        # Fallback: plain write without atomicity
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(memoire, f, indent=2, ensure_ascii=False)
+        print("[WARN] Atomic replace failed – used direct write instead.")
+    finally:
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
-        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────

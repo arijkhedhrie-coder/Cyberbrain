@@ -1,7 +1,6 @@
 // src/components/dashboard/TrackServersPanel.tsx
 
-
-import { useState, useEffect, type FC } from "react";
+import { useState, useEffect, useMemo, type FC } from "react";
 import type { KpiData, AlarmItem } from "../../../shared/types/idps";
 
 import "../../../shared/style/Trackserverspanel.css";
@@ -42,7 +41,7 @@ const ENGINE_TO_LABEL: Record<string, string> = {
   KERNEL:     "kernel",
   SESSION:    "kernel",
   PREDICTION: "kernel",
-  CORRELATION:"auth",  // correlation souvent liée à SSH
+  CORRELATION:"auth",
 };
 
 // ── Couleurs sévérité / action ────────────────────────────────────────────────
@@ -62,6 +61,14 @@ const ACTION_COLOR: Record<string, string> = {
   MONITOR:    "#378ADD",
 };
 
+// ── Temporary fallback servers (always show all four) ──────────────────────
+const KNOWN_SERVERS: ServerInfo[] = [
+  { id: 'auth',   label: 'auth',   display: 'SSH Auth',       sources: ['auth'] },
+  { id: 'web',    label: 'web',    display: 'Web Server',      sources: ['web'] },
+  { id: 'ftp',    label: 'ftp',    display: 'FTP Server',      sources: ['ftp'] },
+  { id: 'kernel', label: 'kernel', display: 'Kernel/Sys',      sources: ['kernel'] },
+];
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -69,7 +76,6 @@ interface Props {
   alarms:          AlarmItem[];
   loading:         boolean;
   wsConnected:     boolean;
-  // ✅ [FIX-4] onServersChange reçoit les LABELS (auth/web/...) pas les IDs S3
   onServersChange: (servers: string[]) => void;
 }
 
@@ -95,83 +101,121 @@ const SevBadge: FC<{ sev: string }> = ({ sev }) => {
 export const TrackServersPanel: FC<Props> = ({
   kpis, alarms, loading, wsConnected, onServersChange,
 }) => {
-  // ✅ [FIX-4] servers = ServerInfo[] avec id, label, display
+  // ✅ raw servers from backend
   const { servers, serverLabels, isEmpty, loading: serversLoading, error } = useServers();
 
-  // ✅ [FIX-1] Initialisé vide — sélection dynamique depuis le backend
+  // Merge with known servers so all four always appear
+  const mergedServers: ServerInfo[] = useMemo(() => {
+    const map = new Map<string, ServerInfo>();
+    for (const s of KNOWN_SERVERS) map.set(s.label, s);
+    for (const s of servers) map.set(s.label, s);   // backend can override extra info
+    return Array.from(map.values());
+  }, [servers]);
+
+  const mergedLabels = useMemo(() => mergedServers.map(s => s.label), [mergedServers]);
+
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
   const [sevFilter,      setSevFilter]      = useState<string>("ALL");
   const [searchIp,       setSearchIp]       = useState<string>("");
   const [sortField,      setSortField]      = useState<keyof AlarmItem>("timestamp");
   const [sortAsc,        setSortAsc]        = useState(false);
 
-  // ✅ Sélectionne tout au premier chargement
+  // ✅ Sélectionne tout au premier chargement (using merged labels)
   useEffect(() => {
-    if (serverLabels.length > 0 && selectedLabels.size === 0) {
-      const allLabels = new Set(serverLabels);
+    if (mergedLabels.length > 0 && selectedLabels.size === 0) {
+      const allLabels = new Set(mergedLabels);
       setSelectedLabels(allLabels);
-      onServersChange(serverLabels);  // ✅ passe les labels, pas les IDs S3
+      onServersChange(mergedLabels);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverLabels.join(",")]);
+  }, [mergedLabels.join(",")]);
 
-  // ── Toggle sélection ─────────────────────────────────────────────────────
+  // Toggle sélection
   const toggle = (label: string) => {
     setSelectedLabels(prev => {
       const n = new Set(prev);
       n.has(label) ? n.delete(label) : n.add(label);
-      onServersChange(Array.from(n));  // ✅ labels uniquement
+      onServersChange(Array.from(n));
       return n;
     });
   };
 
   const selectAll  = () => {
-    const s = new Set(serverLabels);
+    const s = new Set(mergedLabels);
     setSelectedLabels(s);
-    onServersChange(serverLabels);
+    onServersChange(mergedLabels);
   };
   const selectNone = () => {
     setSelectedLabels(new Set());
     onServersChange([]);
   };
 
-  // ✅ [FIX-4] Filtre alarmes par engine → label OU server_id partiel
-  const alarmsForLabel = (label: string): AlarmItem[] =>
-    alarms.filter(a => {
-      // Correspondance engine → label métier
-      const engineLabel = ENGINE_TO_LABEL[a.engine?.toUpperCase() ?? ""] ?? "";
-      if (engineLabel === label) return true;
-      // Correspondance server_id partiel (si présent)
+  // ── Pre‑compute alarm IDs per label (cached, O(n) total) ────────────────
+  const alarmsForLabel = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const a of alarms) {
+      const label = ENGINE_TO_LABEL[a.engine?.toUpperCase() ?? ""] ?? "";
+      if (!label) continue;
+      if (!map.has(label)) map.set(label, new Set());
+      map.get(label)!.add(a.id);
+      // Also match by server_id if present
       if (a.server_id) {
         const sid = a.server_id.toLowerCase();
-        if (sid.includes(label)) return true;
-        // Correspondance via _s3_id_to_label simplifié
-        if (label === "auth"   && (sid.includes("auth") || sid.includes("ssh") || sid.includes("sshd"))) return true;
-        if (label === "web"    && (sid.includes("web") || sid.includes("access") || sid.includes("nginx"))) return true;
-        if (label === "ftp"    && (sid.includes("ftp") || sid.includes("vsftpd"))) return true;
-        if (label === "kernel" && (sid.includes("kernel") || sid.includes("syslog") || sid.includes("kern"))) return true;
+        for (const [l, keywords] of [
+          ["auth", ["auth","ssh","sshd"]],
+          ["web", ["web","access","nginx"]],
+          ["ftp", ["ftp","vsftpd"]],
+          ["kernel", ["kernel","syslog","kern"]],
+        ] as [string, string[]][]) {
+          if (keywords.some(k => sid.includes(k))) {
+            if (!map.has(l)) map.set(l, new Set());
+            map.get(l)!.add(a.id);
+          }
+        }
       }
-      return false;
-    });
+    }
+    return map;
+  }, [alarms]);
 
-  // ── Alarmes des labels sélectionnés ──────────────────────────────────────
-  const selectedArray  = Array.from(selectedLabels);
-  const selectedAlarms = selectedLabels.size === 0
-    ? alarms
-    : alarms.filter(a => selectedArray.some(label => alarmsForLabel(label).some(x => x.id === a.id)));
+  // Fast selected alarms: pre‑compute selected IDs once
+  const selectedIds = useMemo(() => {
+    if (selectedLabels.size === 0) return null; // null means all alarms
+    const ids = new Set<string>();
+    for (const label of selectedLabels) {
+      const set = alarmsForLabel.get(label);
+      if (set) for (const id of set) ids.add(id);
+    }
+    return ids;
+  }, [selectedLabels, alarmsForLabel]);
 
-  // ── Filtrage + tri ────────────────────────────────────────────────────────
-  const filtered = selectedAlarms
-    .filter(a => sevFilter === "ALL" || a.severity === sevFilter)
-    .filter(a =>
-      searchIp === "" ||
-      a.source_ip.toLowerCase().includes(searchIp.toLowerCase())
-    )
-    .sort((a, b) => {
-      const va = String(a[sortField] ?? "");
-      const vb = String(b[sortField] ?? "");
-      return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+  const selectedAlarms = selectedIds
+    ? alarms.filter(a => selectedIds.has(a.id))
+    : alarms;
+
+  // ── Filtrage + tri (numeric‑aware) ──────────────────────────────────────
+  const filtered = useMemo(() => {
+    const filteredAlarms = selectedAlarms
+      .filter(a => sevFilter === "ALL" || a.severity === sevFilter)
+      .filter(a =>
+        searchIp === "" ||
+        a.source_ip.toLowerCase().includes(searchIp.toLowerCase())
+      );
+
+    return [...filteredAlarms].sort((a, b) => {
+      const va = a[sortField];
+      const vb = b[sortField];
+
+      // numeric fields
+      if (typeof va === "number" && typeof vb === "number") {
+        return sortAsc ? va - vb : vb - va;
+      }
+
+      // string fields
+      const sa = String(va ?? "");
+      const sb = String(vb ?? "");
+      return sortAsc ? sa.localeCompare(sb) : sb.localeCompare(sa);
     });
+  }, [selectedAlarms, sevFilter, searchIp, sortField, sortAsc]);
 
   const handleSort = (field: keyof AlarmItem) => {
     if (sortField === field) setSortAsc(v => !v);
@@ -195,29 +239,19 @@ export const TrackServersPanel: FC<Props> = ({
         }}>
           Chargement des serveurs depuis le backend…
         </div>
-      ) : isEmpty ? (
-        // ✅ [FIX-1] Message clair quand le backend retourne []
+      ) : mergedServers.length === 0 ? (
         <div style={{
-          padding: "24px", textAlign: "center",
+          padding: "32px 24px", textAlign: "center",
           background: "var(--card, #fff)", borderRadius: 8,
           border: "0.5px solid var(--border, #e5e7eb)",
         }}>
-          <div style={{ fontSize: 24, marginBottom: 10 }}>⚠️</div>
+          <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
-            Aucun serveur disponible
+            Aucun serveur détecté
           </div>
-          <div style={{ fontSize: 11, color: "var(--muted, #6b7280)", marginBottom: 12 }}>
-            Lancez le pipeline pour charger les fichiers logs et détecter les serveurs.
+          <div style={{ fontSize: 11, color: "var(--muted, #6b7280)", maxWidth: 320, margin: "0 auto" }}>
+            Les serveurs seront détectés automatiquement quand le pipeline commencera à traiter les fichiers logs.
           </div>
-          {error && (
-            <div style={{
-              fontSize: 10, padding: "6px 12px", borderRadius: 6,
-              background: "rgba(226,75,74,0.1)", color: "#E24B4A",
-              fontFamily: "monospace",
-            }}>
-              {error}
-            </div>
-          )}
         </div>
       ) : (
         <>
@@ -227,7 +261,7 @@ export const TrackServersPanel: FC<Props> = ({
             flexWrap: "wrap", gap: 8,
           }}>
             <div style={{ fontSize: 11, color: "var(--muted, #6b7280)" }}>
-              <b style={{ color: "var(--text)" }}>{selectedLabels.size}</b> / {servers.length} serveur{servers.length > 1 ? "s" : ""} sélectionné{selectedLabels.size > 1 ? "s" : ""}
+              <b style={{ color: "var(--text)" }}>{selectedLabels.size}</b> / {mergedServers.length} serveur{mergedServers.length > 1 ? "s" : ""} sélectionné{selectedLabels.size > 1 ? "s" : ""}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={selectAll} style={{
@@ -252,15 +286,17 @@ export const TrackServersPanel: FC<Props> = ({
           {/* ── Grille de cartes ── */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: `repeat(${Math.min(servers.length, 4)}, 1fr)`,
+            gridTemplateColumns: `repeat(${Math.min(mergedServers.length, 4)}, 1fr)`,
             gap: 10,
           }}>
-            {servers.map((srv: ServerInfo, i: number) => {
+            {mergedServers.map((srv: ServerInfo, i: number) => {
               const isSelected   = selectedLabels.has(srv.label);
               const color        = SERVER_COLORS[i % SERVER_COLORS.length];
               const icon         = LABEL_ICON[srv.label]  ?? "🖥️";
               const desc         = LABEL_DESC[srv.label]  ?? srv.id;
-              const serverAlarms = alarmsForLabel(srv.label);
+              const serverAlarms = alarms.filter(a =>
+                alarmsForLabel.get(srv.label)?.has(a.id)
+              );
               const critCount    = serverAlarms.filter(a => a.severity === "CRITICAL").length;
               const hasAlarm     = critCount > 0;
 
@@ -299,7 +335,6 @@ export const TrackServersPanel: FC<Props> = ({
                   {/* Icône + titre */}
                   <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>
                   <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginBottom: 2 }}>
-                    {/* ✅ [FIX-4] Affiche display ("SSH Auth") pas l'ID S3 */}
                     {srv.display}
                   </div>
                   <div style={{ fontSize: 10, color: "var(--muted, #6b7280)", marginBottom: 8, fontFamily: "monospace" }}>
@@ -348,7 +383,7 @@ export const TrackServersPanel: FC<Props> = ({
       )}
 
       {/* ── Résumé global ── */}
-      {!isEmpty && (
+      {mergedServers.length > 0 && (
         <div style={{
           background: "var(--card, #fff)",
           border: "0.5px solid var(--border, #e5e7eb)",
@@ -356,10 +391,10 @@ export const TrackServersPanel: FC<Props> = ({
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", flex: 1 }}>
-              {selectedArray.length === 0
+              {selectedLabels.size === 0
                 ? "Aucun serveur sélectionné"
-                : selectedArray
-                    .map(label => servers.find(s => s.label === label)?.display ?? label)
+                : Array.from(selectedLabels)
+                    .map(label => mergedServers.find(s => s.label === label)?.display ?? label)
                     .join(" + ")}
             </div>
             <span style={{

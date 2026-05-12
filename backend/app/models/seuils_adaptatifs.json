@@ -5,8 +5,8 @@
   "mem_usage": 90.0,
   "web_threshold": 30.0,
   "ftp_threshold": 15.0,
-  "_updated_at": "2026-05-09T12:03:14.833916",
-  "_version_id": "20260509_120314_818584",
+  "_updated_at": "2026-05-12T17:58:46.076843",
+  "_version_id": "20260512_175845_987844",
   "_gate_result": {
     "accepted": true,
     "reason": "Amélioration estimée : FP 0.0% → 0.0% (delta=+0.0%)",
@@ -15,7 +15,7 @@
     "delta": 0.0
   },
   "_sources": {
-    "fp_rate": 0.0,
+    "fp_rate": -0.014,
     "from_action_stats": false,
     "from_dynamic_kb": false,
     "aggressivity": 0.5

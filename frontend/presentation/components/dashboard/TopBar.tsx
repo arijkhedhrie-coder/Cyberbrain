@@ -39,12 +39,10 @@ export const TopBar: FC<Props> = ({
     </span>
 
     <div className="topbar__actions">
-      {isLive && (
-        <div className="topbar__badge topbar__badge--live">
-          <div className="topbar__badge-dot" />
-          LIVE
-        </div>
-      )}
+      <div className={`topbar__badge ${wsConnected ? "topbar__badge--live" : "topbar__badge--ws-off"}`}>
+        <div className="topbar__badge-dot" />
+        {wsConnected ? (isLive ? "REAL DATA" : "LIVE (idle)") : "OFFLINE"}
+      </div>
       <div className={`topbar__badge ${wsConnected ? "topbar__badge--ws-on" : "topbar__badge--ws-off"}`}>
         <div className="topbar__badge-dot" />
         {wsConnected ? "WS connecté" : "WS hors ligne"}

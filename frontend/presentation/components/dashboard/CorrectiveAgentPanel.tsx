@@ -93,9 +93,19 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
         fetch(`${API_BASE}/api/corrective/mode`,  { headers }),
         fetch(`${API_BASE}/api/corrective/stats`, { headers }),
       ]);
-      if (modeRes.ok) setAgentMode(await modeRes.json());
-      if (statRes.ok) setStats(await statRes.json());
-    } catch { /* backend absent */ }
+      if (modeRes.ok) {
+        const modeData = await modeRes.json();
+        setAgentMode(modeData);
+        console.log("[CorrectiveAgentPanel] agentMode fetched:", modeData);
+      }
+      if (statRes.ok) {
+        const statData = await statRes.json();
+        setStats(statData);
+        console.log("[CorrectiveAgentPanel] stats fetched:", statData);
+      }
+    } catch (err) {
+      console.error("[CorrectiveAgentPanel] fetch error:", err);
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -263,7 +273,7 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
       )}
 
       {/* ── Stats bar ── */}
-      {stats && (
+            {stats && (
         <div style={{
           display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 16,
         }}>
@@ -274,8 +284,8 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
             { label: "REJETÉS",      value: stats.rejected, color: "#ef4444" },
             {
               label: "CONF. MOY.",
-              value: `${(stats.avg_confidence * 100).toFixed(0)}%`,
-              color: CONFIDENCE_COLOR(stats.avg_confidence),
+              value: `${((isFinite(stats.avg_confidence) ? stats.avg_confidence : 0) * 100).toFixed(0)}%`,
+              color: CONFIDENCE_COLOR(isFinite(stats.avg_confidence) ? stats.avg_confidence : 0),
             },
           ] as { label: string; value: string | number; color: string }[]).map(({ label, value, color }) => (
             <div key={label} style={{
@@ -348,10 +358,30 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
 
         {pending.length === 0 ? (
           <div style={{
-            padding: "20px", textAlign: "center", color: "#475569", fontSize: 12,
+            padding: "24px", textAlign: "center", color: "#475569", fontSize: 12,
             background: "#0f1623", borderRadius: 8, border: "1px solid #1e293b",
           }}>
-            ✅ Aucune suggestion en attente de validation.
+            <div style={{ fontSize: 28, marginBottom: 10 }}>✅</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>
+              Aucune suggestion en attente
+            </div>
+            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 12 }}>
+              {agentMode?.mode === "AUTO" 
+                ? "Le mode AUTO traite les alarmes automatiquement — vérifiez les statistiques pour les actions exécutées."
+                : agentMode?.mode === "TRAINING"
+                ? "Agent en mode TRAINING — il collecte des exemples pour améliorer ses décisions."
+                : "Prêt à recevoir des suggestions du système. Les alarmes critiques déclencheront des suggestions."}
+            </div>
+            {stats && stats.approved > 0 && (
+              <div style={{
+                fontSize: 10, padding: "8px 12px", borderRadius: 6,
+                background: "rgba(29,158,117,0.1)", color: "#1D9E75",
+                fontFamily: "monospace", marginTop: 8, display: "inline-block",
+                border: "1px solid rgba(29,158,117,0.2)",
+              }}>
+                📊 {stats.approved} suggestion{stats.approved > 1 ? "s" : ""} approuvée{stats.approved > 1 ? "s" : ""} • {stats.rejected} rejetée{stats.rejected > 1 ? "s" : ""}
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

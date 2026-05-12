@@ -1,7 +1,6 @@
 // presentation/hooks/useCorrelationViewModel.ts
 import { useState, useEffect, useCallback } from "react";
-import { fetchAttackTimeline, fetchCorrelationGraph,
-  mockAttackTimeline, mockCorrelationGraph } from "../../infrastructure/api/analyticsApi";
+import { fetchAttackTimeline, fetchCorrelationGraph } from "../../infrastructure/api/analyticsApi";
 import type { AttackTimelineEvent, CorrelationNode, CorrelationEdge } from "../../shared/types/analytics";
 
 export interface CorrelationViewModel {
@@ -14,9 +13,9 @@ export interface CorrelationViewModel {
 }
 
 export function useCorrelationViewModel(token?: string): CorrelationViewModel {
-  const [timeline, setTimeline] = useState<AttackTimelineEvent[]>(mockAttackTimeline());
-  const [nodes, setNodes] = useState<CorrelationNode[]>(mockCorrelationGraph().nodes);
-  const [edges, setEdges] = useState<CorrelationEdge[]>(mockCorrelationGraph().edges);
+  const [timeline, setTimeline] = useState<AttackTimelineEvent[]>([]);
+  const [nodes, setNodes] = useState<CorrelationNode[]>([]);
+  const [edges, setEdges] = useState<CorrelationEdge[]>([]);
   const [selectedIp, setSelectedIp] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 

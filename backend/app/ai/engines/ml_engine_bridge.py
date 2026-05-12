@@ -1,33 +1,4 @@
-"""
-ml_engine_bridge.py — v4 HYBRID (Rule-based + LLM-adaptive)
-═══════════════════════════════════════════════════════════════════════════════
-New in v4 — Hybrid Architecture:
 
-  PASS 1 (always runs):
-    All 5 engines run with their DEFAULT thresholds.
-    Produces initial alarms + metrics for the agent layer.
-
-  AGENT REASONING (outside this file):
-    Orchestrator agent reads Pass 1 output + metrics context.
-    Emits a DynamicConfig: threshold overrides, IPs to escalate,
-    engines to re-run.
-
-  PASS 2 (only if DynamicConfig has overrides):
-    Bridge re-runs only the engines flagged in DynamicConfig.rerun_engines,
-    with adjusted thresholds from the agent.
-    Force-escalates IPs in DynamicConfig.escalate_ips.
-    Suppresses IPs in DynamicConfig.suppress_ips.
-    Merges Pass 2 results with Pass 1 — best score wins per IP.
-
-This keeps detection DETERMINISTIC and AUDITABLE (Pass 1 never changes)
-while adding CONTEXTUAL INTELLIGENCE (Pass 2 adapts based on reasoning).
-
-Preserved from v3:
-  ✅ Time-aware correlation (30-min sliding window)
-  ✅ Attack chain detection (SCAN→BRUTE→BREACH→EXFIL)
-  ✅ Weighted combo scores per protocol pair
-═══════════════════════════════════════════════════════════════════════════════
-"""
 
 from __future__ import annotations
 
@@ -196,6 +167,7 @@ def _run_engines(
     df_norm: pd.DataFrame,
     cfg: DynamicConfig,
     engines_filter: list[str] | None = None,
+    layer0_signals: dict | None = None,          # NEW
 ) -> dict[str, Any]:
     """
     Runs all 5 engines (or a subset if engines_filter is given).
@@ -207,57 +179,79 @@ def _run_engines(
     run_all = engines_filter is None
     results: dict[str, Any] = {}
 
-    # SSH / ml_engine
+    # --- Layer 0 boost calculation ---
+    layer_boost = 0.0
+    if 'layer0_risk' in df_norm.columns:
+        layer_boost = float(df_norm['layer0_risk'].max())
+
+    # SSH / ml_engine (with dynamic threshold adjustment)
     if run_all or 'ssh' in engines_filter:
+        # Use default thresholds if config value is None
+        ssh_high_default = cfg.ssh_high_risk_threshold if cfg.ssh_high_risk_threshold is not None else HIGH_RISK_THRESHOLD
+        ssh_med_default  = cfg.ssh_med_risk_threshold  if cfg.ssh_med_risk_threshold  is not None else MED_RISK_THRESHOLD
+
+        # Adjust thresholds downwards based on max layer0_risk
+        high_adj = ssh_high_default - (layer_boost * 5)
+        med_adj  = ssh_med_default  - (layer_boost * 3)
+        # Clamp to a safe minimum (never go below 5)
+        high_adj = max(5.0, high_adj)
+        med_adj  = max(5.0, med_adj)
+
         results['risk_table'] = run_idps(
             df_norm,
-            high_risk_threshold=cfg.ssh_high_risk_threshold,
-            med_risk_threshold=cfg.ssh_med_risk_threshold,
+            high_risk_threshold=high_adj,
+            med_risk_threshold=med_adj,
         )
     else:
         results['risk_table'] = None
 
     # WEB engine
     if run_all or 'web' in engines_filter:
+        web_high = cfg.web_high_risk_threshold if cfg.web_high_risk_threshold is not None else 55
+        web_med  = cfg.web_med_risk_threshold  if cfg.web_med_risk_threshold  is not None else 30
         results['web_table'] = run_web_idps(
             df_norm,
-            high_risk_threshold=cfg.web_high_risk_threshold,
-            med_risk_threshold=cfg.web_med_risk_threshold,
+            high_risk_threshold=web_high,
+            med_risk_threshold=web_med,
         )
     else:
         results['web_table'] = pd.DataFrame()
 
     # SESSION engine
     if run_all or 'session' in engines_filter:
+        sess_high = cfg.session_high_risk_threshold if cfg.session_high_risk_threshold is not None else 50
+        sess_med  = cfg.session_med_risk_threshold  if cfg.session_med_risk_threshold  is not None else 25
         results['sess_result'] = run_session_idps(
             df_norm,
-            high_risk_threshold=cfg.session_high_risk_threshold,
-            med_risk_threshold=cfg.session_med_risk_threshold,
+            high_risk_threshold=sess_high,
+            med_risk_threshold=sess_med,
         )
     else:
         results['sess_result'] = {'alarms': [], 'features': {}}
 
     # FTP engine
     if run_all or 'ftp' in engines_filter:
+        ftp_high = cfg.ftp_high_risk_threshold if cfg.ftp_high_risk_threshold is not None else 55
+        ftp_med  = cfg.ftp_med_risk_threshold  if cfg.ftp_med_risk_threshold  is not None else 30
         results['ftp_table'] = run_ftp_idps(
             df_norm,
-            high_risk_threshold=cfg.ftp_high_risk_threshold,
-            med_risk_threshold=cfg.ftp_med_risk_threshold,
+            high_risk_threshold=ftp_high,
+            med_risk_threshold=ftp_med,
         )
     else:
         results['ftp_table'] = pd.DataFrame()
 
     # KERNEL engine
     if run_all or 'kernel' in engines_filter:
+        kernel_high = cfg.kernel_high_risk_threshold if cfg.kernel_high_risk_threshold is not None else 50
         results['kernel_meta'] = run_kernel_idps(
             df_norm,
-            high_risk_threshold=cfg.kernel_high_risk_threshold,
+            high_risk_threshold=kernel_high,
         )
     else:
         results['kernel_meta'] = {'alarms': [], 'weighted_risk_score': 0}
 
     return results
-
 
 # ── Phase C.8: A/B gate helpers ───────────────────────────────────────────────
 
@@ -444,6 +438,63 @@ def _write_change_log(
     return version_id
 
 
+def layer0_pre_scan(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """
+    Layer 0: ultra-light pre-filter.
+    Adds early suspicion signals BEFORE full engines run.
+    """
+
+    df = df.copy()
+    signals: dict[str, dict] = {}
+
+    if df.empty:
+        return df, signals
+
+    ip_col = next(
+        (c for c in df.columns if 'ip' in c.lower() or c.lower() == 'ip_source'),
+        None
+    )
+
+    if not ip_col:
+        df["layer0_risk"] = 0
+        return df, signals
+
+    # simple counters
+    ip_counts = df[ip_col].value_counts().to_dict()
+
+    for ip, count in ip_counts.items():
+        risk = 0
+
+        # 🔥 rule 1: flood
+        if count > 50:
+            risk += 0.4
+
+        # 🔥 rule 2: medium burst
+        elif count > 20:
+            risk += 0.25
+
+        # 🔥 rule 3: tiny presence (normal)
+        elif count > 5:
+            risk += 0.1
+
+        signals[str(ip)] = {
+            "layer0_risk": round(risk, 3),
+            "count": int(count),
+            "flags": []
+        }
+
+        if risk >= 0.4:
+            signals[str(ip)]["flags"].append("HIGH_VOLUME")
+        elif risk >= 0.25:
+            signals[str(ip)]["flags"].append("MED_VOLUME")
+
+    # attach to dataframe
+    df["layer0_risk"] = df[ip_col].map(
+        lambda ip: signals.get(str(ip), {}).get("layer0_risk", 0)
+    )
+
+    return df, signals
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def detecter_anomalies(
@@ -472,8 +523,11 @@ def detecter_anomalies(
 
     df_norm = normalize(df_raw, verbose=True)
 
+    # 🧠 Layer 0 pre-scan (ultra-light flood detection)
+    df_norm, layer0_signals = layer0_pre_scan(df_norm)
+
     # ── PASS 1: default thresholds ────────────────────────────────────────
-    p1 = _run_engines(df_norm, DynamicConfig.default())
+    p1 = _run_engines(df_norm, DynamicConfig.default(), layer0_signals=layer0_signals)
 
     try:
         prediction = run_prediction_engine(df_norm)
@@ -487,7 +541,7 @@ def detecter_anomalies(
         p1['sess_result'], p1['kernel_meta'], df_norm,
         window_min=CORR_TIME_WINDOW_MIN,
     )
-    alarmes_p1 = _collect_all_alarms(p1, corr_map_p1, prediction, threshold_snapshot=p1_snapshot)
+    alarmes_p1 = _collect_all_alarms(p1, corr_map_p1, prediction, threshold_snapshot=p1_snapshot, layer0_signals=layer0_signals)
     threshold_snapshots = [p1_snapshot]
 
     # ── PASS 2: shadow mode — results NEVER applied automatically ────────────
@@ -500,7 +554,7 @@ def detecter_anomalies(
         print(f"[BRIDGE v5] Pass 2 results are NOT applied until the gate approves.")
 
         engines_to_rerun = cfg.rerun_engines if cfg.rerun_engines else None
-        p2 = _run_engines(df_norm, cfg, engines_filter=engines_to_rerun)
+        p2 = _run_engines(df_norm, cfg, engines_filter=engines_to_rerun, layer0_signals=layer0_signals)
 
         p2_snapshot = _build_threshold_snapshot(cfg, pass_number=2)
         window = cfg.correlation_window_min or CORR_TIME_WINDOW_MIN
@@ -509,7 +563,7 @@ def detecter_anomalies(
             p2['sess_result'], p2['kernel_meta'], df_norm,
             window_min=window,
         )
-        alarmes_shadow = _collect_all_alarms(p2, corr_map_p2, prediction, threshold_snapshot=p2_snapshot)
+        alarmes_shadow = _collect_all_alarms(p2, corr_map_p2, prediction, threshold_snapshot=p2_snapshot, layer0_signals=layer0_signals)
         threshold_snapshots.append(p2_snapshot)
 
         # ── Step 2: Compute pass metrics, read trust score, run gate ─────────
@@ -822,6 +876,7 @@ def _collect_all_alarms(
     corr_map: dict,
     prediction: dict,
     threshold_snapshot: dict | None = None,
+    layer0_signals: dict | None = None,          # NEW
 ) -> list[dict]:
     """
     Builds the full alarm list from a single set of engine outputs.
@@ -856,6 +911,17 @@ def _collect_all_alarms(
     if threshold_snapshot:
         for a in alarmes:
             a.setdefault("threshold_snapshot", threshold_snapshot)
+
+    # 🧠 Layer 0 enrichment
+    if layer0_signals:
+        for a in alarmes:
+            ip = _clean_ip(a.get("ip"))
+            if ip in layer0_signals:
+                a["layer0_risk"]  = layer0_signals[ip].get("layer0_risk", 0)
+                a["layer0_flags"] = layer0_signals[ip].get("flags", [])
+                # Optional: Boost score if early flood detected
+                if a.get("layer0_risk", 0) >= 0.4:
+                    a["score"] = min(100.0, a.get("score", 0) + 5.0)
 
     # Fix 2: Bridge alarms come from multi-engine consensus — treat as high agreement.
     # anomaly_detection.py sets models_agreed per-IP from the C2 vote matrix.
