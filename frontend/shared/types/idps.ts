@@ -21,6 +21,7 @@ export type KpiData = {
   available:            boolean;
   missing_data:         string[];
   health_score:         number | null;
+  health_status?:       string; 
   ssh_failures:         number | null;
   blocked_ips:          number | null;
   alert_status:         string | null;
@@ -141,6 +142,21 @@ export type PipelineLatest = {
   step_count: number;
 };
 
+export type WorkflowActivity = {
+  id: string;
+  timestamp: string;
+  session_id?: string;
+  event_type?: string;
+  stage: string;
+  actor: string;
+  title: string;
+  detail: string;
+  status: string;
+  severity: string;
+  progress?: number | null;
+  meta?: Record<string, unknown>;
+};
+
 
 // ─── /health  (FastAPI api_auth.py) ──────────────────────────────────────────
 export type HealthCheck = {
@@ -206,12 +222,25 @@ export type WsSuggestionMessage = {
   suggestion: CorrectiveSuggestion;
 };
 
+export type WsActivityMessage = {
+  type: "activity";
+  activity: WorkflowActivity;
+};
+
+export type WsActivityHistoryMessage = {
+  type: "activity_history";
+  activities: WorkflowActivity[];
+  count: number;
+};
+
 // WsHistoryMessage ajouté à l'union — corrige ts(2367)
 export type WsIncomingMessage =
   | WsAlarmMessage
   | WsLogMessage
   | WsMetricsMessage
-  | WsHistoryMessage   
+  | WsHistoryMessage
+  | WsActivityMessage
+  | WsActivityHistoryMessage
   | WsPongMessage
   | WsSuggestionMessage
   | WsHeartbeat
@@ -230,3 +259,5 @@ export const isAlarmMsg   = (m: WsIncomingMessage): m is WsAlarmMessage   => m.t
 export const isLogMsg     = (m: WsIncomingMessage): m is WsLogMessage     => m.type === "log";
 export const isMetricsMsg = (m: WsIncomingMessage): m is WsMetricsMessage => m.type === "metrics";
 export const isHistoryMsg = (m: WsIncomingMessage): m is WsHistoryMessage => m.type === "history";
+export const isActivityMsg = (m: WsIncomingMessage): m is WsActivityMessage => m.type === "activity";
+export const isActivityHistoryMsg = (m: WsIncomingMessage): m is WsActivityHistoryMessage => m.type === "activity_history";

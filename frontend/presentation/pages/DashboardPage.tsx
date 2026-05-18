@@ -6,6 +6,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import type { FC } from "react";
 import { useNavigate } from "react-router-dom";
 
 // ── Infrastructure ────────────────────────────────────────────────
@@ -27,27 +28,58 @@ import { CorrectiveAgentPanel } from "../components/dashboard/CorrectiveAgentPan
 import { TrackServersPanel }    from "../components/dashboard/TrackServersPanel";
 
 // ── Nouveaux composants analytiques ──────────────────────────────
-// Chaque composant reçoit ses props directement depuis useIdpsDashboard
 import { EntropyChart }          from "../components/charts/EntropyChart";
 import { AttackHeatmap }         from "../components/charts/AttackHeatmap";
 import { RadarEngineChart }      from "../components/charts/RadarEngineChart";
 import { StreamingPipeline }     from "../components/charts/StreamingPipeline";
-import { ConfusionMatrix }       from "../components/charts/ConfusionMatrics";
+import { BacktestAccuracyChart } from "../components/charts/BacktestAccuracyChart";
 import { AttackTimelinePanel } from "../components/panels/AttackTimelinePanel";
 import { ExplainabilityPanel } from "../components/panels/ExplainibilityPanel";
 import { AdaptiveThresholdPanel } from "../components/panels/AdaptiveThresholdPanel";
 
 // ── Types ─────────────────────────────────────────────────────────
 import type { EntropyPoint } from "../../shared/types/analytics";
+import type { TrustData } from "../../shared/types/idps";
 
 // ── Styles ────────────────────────────────────────────────────────
 import "../../shared/style/global.css";
 import "../../shared/style/theme.css";
 import "../../shared/style/Sidebar.css";
 import { ChatBot } from "../components/Chat/ChatBot";
+import { ForecastPanel } from "../components/forecast/ForecastPanel";
 
+type Section = "dashboard" | "track" | "corrective" | "forecast";
 
-type Section = "dashboard" | "track" | "corrective";
+type PredictionSummary = {
+  available: boolean;
+  prediction_score: number;
+  flags: string[];
+  predicted_events: string[];
+  message?: string;
+  risk_evolution: Array<{ time: string; risk: number; failures: number }>;
+  behavioral_analysis: {
+    ssh_failures_trend: number;
+    unique_ips_trend: number;
+    username_diversity: number;
+    ftp_activity: number;
+    kernel_errors: number;
+  };
+  prevention_suggestions: string[];
+  risk_level: string;
+};
+
+const FALLBACK_TRUST: TrustData = {
+  available: false,
+  model_agreement: null,
+  false_positive_rate: null,
+  drift_score: null,
+  drift_label: "UNKNOWN",
+  drift_flagged: false,
+  stability: "UNKNOWN",
+  confidence_in_metrics: null,
+  confidence_label: "Unavailable",
+  signals_summary: "",
+};
 
 // ════════════════════════════════════════════════════════════════
 // StarField — animation décorative (inchangée)
@@ -157,6 +189,34 @@ export const DashboardPage = () => {
   const [section, setSection]                 = useState<Section>("dashboard");
   const [selectedServers, setSelectedServers] = useState<string[]>([]);
   const [relancerLoading, setRelancerLoading] = useState(false);
+  const [prediction, setPrediction]           = useState<PredictionSummary | null>(null);
+  const [dashboardTab, setDashboardTab]       = useState<"liveops" | "analytics" | "pipeline">("liveops");
+
+  const handleSectionChange = useCallback((next: Section) => {
+    setSection(next);
+    if (next === "dashboard") setDashboardTab("liveops");
+  }, []);
+
+  const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchPrediction = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/prediction`);
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json();
+        if (!mounted) return;
+        setPrediction(data);
+      } catch (err) {
+        console.warn("[DashboardPage] prediction fetch failed", err);
+      }
+    };
+
+    fetchPrediction();
+    const id = setInterval(fetchPrediction, 10000);
+    return () => { mounted = false; clearInterval(id); };
+  }, [API_BASE]);
 
   // ╔══════════════════════════════════════════════════════════╗
   // ║   SOURCE UNIQUE — useIdpsDashboard                      ║
@@ -167,19 +227,20 @@ export const DashboardPage = () => {
     apiReady,
     loading,
     lastUpdate,
-    kpis,        // /api/kpis        → health_score, ip_entropy, ssh_failures...
-    alarms,      // /api/alarms + WS → liste des alarmes temps réel
-    engines,     // /api/engine-scores → SSH/WEB/FTP/KERNEL pass1/pass2/alarms
-    decisions,   // /api/decisions   → actions agents CrewAI
-    sessions,    // /api/sessions    → historique sessions pipeline
-    logLines,    // WebSocket "log"  → logs pipeline temps réel
-    trust,       // /api/trust       → model_agreement, drift, fpr
+    kpis,
+    alarms,
+    engines,
+    decisions,
+    sessions,
+    logLines,
+    trust,
+    activities,
     sessionCount,
     logsAnalysed,
     threatLevel,
     wsConnected,
     isLive,
-    suggestions, // WebSocket "suggestion" → agent correcteur
+    suggestions,
   } = useIdpsDashboard(selectedServers);
 
   // ── Sécurité : tableaux toujours définis ─────────────────────
@@ -188,6 +249,8 @@ export const DashboardPage = () => {
   const safeSessions  = useMemo(() => Array.isArray(sessions)  ? sessions  : [], [sessions]);
   const safeDecisions = useMemo(() => Array.isArray(decisions) ? decisions : [], [decisions]);
   const safeLogLines  = useMemo(() => Array.isArray(logLines)  ? logLines  : [], [logLines]);
+  const safeActivities = useMemo(() => Array.isArray(activities) ? activities : [], [activities]);
+  const explainabilityTrust = useMemo(() => trust ?? FALLBACK_TRUST, [trust]);
 
   // ── Alarme critique la plus récente (pour ExplainabilityPanel) ─
   const topAlarm = useMemo(
@@ -199,8 +262,6 @@ export const DashboardPage = () => {
   );
 
   // ── Accumulation entropy (série temporelle en mémoire) ───────
-  // kpis.ip_entropy = scalaire. On accumule ici → courbe EntropyChart.
-  // Aucun endpoint backend supplémentaire nécessaire.
   const entropyRef     = useRef<EntropyPoint[]>([]);
   const prevEntropyRef = useRef<number | null>(null);
   const [entropyHistory, setEntropyHistory] = useState<EntropyPoint[]>([]);
@@ -240,15 +301,15 @@ export const DashboardPage = () => {
   // ─────────────────────────────────────────────────────────────
   return (
     <>
-    
-    <ChatBot />
+      <ChatBot />
       {theme === "dark" && <StarField />}
 
       <div className="page-shell">
 
         <Sidebar
           activeSection={section}
-          onSectionChange={setSection}
+          onSectionChange={handleSectionChange}
+          prediction={prediction ?? undefined}
           username={localStorage.getItem("username") || "admin"}
           onLogout={() => { logout(); navigate("/login"); }}
           sessionStats={{
@@ -276,131 +337,120 @@ export const DashboardPage = () => {
           <div className="main-content__scroll">
 
             {/* ══════════════════════════════════════════════════
-                SECTION — DASHBOARD
+                SECTION — DASHBOARD (with tabs)
             ══════════════════════════════════════════════════ */}
             {section === "dashboard" && (
               <>
-                {/* ── Panneau principal existant (INCHANGÉ) ── */}
-                <DashboardPanel
-                  kpis={kpis}
-                  alarms={safeAlarms}
-                  engines={safeEngines}
-                  decisions={safeDecisions}
-                  sessions={safeSessions}
-                  logLines={safeLogLines}
-                  trust={trust}
-                  loading={loading}
-                  wsConnected={wsConnected}
-                  isLive={isLive}
-                  suggestions={suggestions}
-                />
-
-                {/* ── Courbe minimisation existante (INCHANGÉE) ── */}
-                <MinimizationChart />
-
-                {/* ══════════════════════════════════════════════
-                    DEEP ANALYTICS SECTION
-                    Séparateur visuel entre existant et nouveaux charts
-                ══════════════════════════════════════════════ */}
-                <div className="analytics-divider">
-                  <span className="analytics-divider__label">
-                    ◈ Deep Analytics — Visualisation Temps Réel
-                  </span>
+                {/* ── Tab bar ── */}
+                <div style={{
+                  display: "flex", gap: 4, marginBottom: 16,
+                  background: "rgba(15,23,42,0.5)", borderRadius: 8,
+                  padding: 4, backdropFilter: "blur(8px)",
+                }}>
+                  {(["liveops", "analytics", "pipeline"] as const).map(tab => (
+                    <button
+                      key={tab}
+                      onClick={() => setDashboardTab(tab)}
+                      style={{
+                        flex: 1, padding: "10px 16px", borderRadius: 6,
+                        border: "none",
+                        background: dashboardTab === tab ? "#1e293b" : "transparent",
+                        color: dashboardTab === tab ? "#e2e8f0" : "#64748b",
+                        fontWeight: 600, fontSize: 12, cursor: "pointer",
+                        fontFamily: "'JetBrains Mono', monospace",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {tab === "liveops" && "🚀 Live Ops"}
+                      {tab === "analytics" && "📊 Threat Analytics"}
+                      {tab === "pipeline" && "⚙️ Pipeline & ML Health"}
+                    </button>
+                  ))}
                 </div>
 
-                {/* ────────────────────────────────────────────
-                    1. LIVE STREAMING PIPELINE
-                    Source : logLines (WS) + sessions (REST)
-                    Affiche les étapes du pipeline en temps réel
-                ──────────────────────────────────────────── */}
-                <section className="analytics-section">
-                  <div className="section-title">Live Streaming Pipeline</div>
-                  <StreamingPipeline
-                    logs={safeLogLines}
-                    sessions={safeSessions}
+                {/* ── TAB: Live Ops ── */}
+                {dashboardTab === "liveops" && (
+                  <DashboardPanel
+                    kpis={kpis}
+                    alarms={safeAlarms}
+                    engines={safeEngines}
+                    decisions={safeDecisions}
+                    logLines={safeLogLines}
+                    trust={trust}
+                    activities={safeActivities}
+                    loading={loading}
+                    wsConnected={wsConnected}
+                    isLive={isLive}
                   />
-                </section>
-
-                {/* ────────────────────────────────────────────
-                    2. FEATURE ANALYTICS
-                    EntropyChart     : kpis.ip_entropy accumulé
-                    AdaptiveThreshold: sessions + engines (pass1/pass2)
-                ──────────────────────────────────────────── */}
-                <section className="analytics-section">
-                  <div className="section-title">Feature Analytics</div>
-                  <div className="grid-2">
-                    <EntropyChart data={entropyHistory} />
-                    <AdaptiveThresholdPanel
-                      sessions={safeSessions}
-                      engines={safeEngines}
-                    />
-                  </div>
-                </section>
-
-                {/* ────────────────────────────────────────────
-                    3. MULTI-ENGINE DETECTION
-                    RadarEngineChart : engines[] (pass1/pass2/alarms/status)
-                    AttackHeatmap    : alarms[] (timestamp/engine/score)
-                ──────────────────────────────────────────── */}
-                <section className="analytics-section">
-                  <div className="section-title">Multi-Engine Detection</div>
-                  <div className="grid-2">
-                    <RadarEngineChart engines={safeEngines} />
-                    <AttackHeatmap alarms={safeAlarms} />
-                  </div>
-                </section>
-
-                {/* ────────────────────────────────────────────
-                    4. EXPLAINABLE AI
-                    Source : decisions + suggestions + trust + kpis
-                    Affiché seulement si trust disponible (backend actif)
-                ──────────────────────────────────────────── */}
-                {trust?.available && (
-                  <section className="analytics-section">
-                    <div className="section-title">
-                      Explainable AI — Pourquoi cette alarme ?
-                    </div>
-                    <ExplainabilityPanel
-                      decisions={safeDecisions}
-                      suggestions={suggestions}
-                      trust={trust}
-                      topAlarm={topAlarm}
-                      kpis={kpis ?? null}
-                      engines={safeEngines}
-                    />
-                  </section>
                 )}
 
-                {/* ────────────────────────────────────────────
-                    5. ATTACK RECONSTRUCTION TIMELINE
-                    Source : alarms[] + sessions[]
-                    Affiché seulement si des alarmes existent
-                ──────────────────────────────────────────── */}
-                {safeAlarms.length > 0 && (
-                  <section className="analytics-section">
-                    <div className="section-title">
-                      Attack Reconstruction Timeline
+                {/* ── TAB: Threat Analytics ── */}
+                {dashboardTab === "analytics" && (
+                  <>
+                    <MinimizationChart />
+                    <div className="analytics-divider" style={{ marginTop: 16, marginBottom: 8 }}>
+                      <span className="analytics-divider__label">◈ Deep Analytics</span>
                     </div>
-                    <AttackTimelinePanel
-                      alarms={safeAlarms}
-                      sessions={safeSessions}
-                    />
-                  </section>
+                    <div className="grid-2" style={{ gap: 16 }}>
+                      <RadarEngineChart engines={safeEngines} />
+                      <AttackHeatmap alarms={safeAlarms} />
+                    </div>
+                    {safeAlarms.length > 0 && (
+                      <section className="analytics-section" style={{ marginTop: 16 }}>
+                        <div className="section-title">Attack Reconstruction Timeline</div>
+                        <AttackTimelinePanel alarms={safeAlarms} sessions={safeSessions} />
+                      </section>
+                    )}
+                  </>
                 )}
 
-                {/* ────────────────────────────────────────────
-                    6. DETECTION PERFORMANCE
-                    Source : decisions[] + alarms[]
-                    Affiché seulement si des décisions existent
-                ──────────────────────────────────────────── */}
-                {safeDecisions.length > 0 && (
-                  <section className="analytics-section">
-                    <div className="section-title">Detection Performance</div>
-                    <ConfusionMatrix
-                      decisions={safeDecisions}
-                      alarms={safeAlarms}
-                    />
-                  </section>
+                {/* ── TAB: Pipeline & ML Health ── */}
+                {dashboardTab === "pipeline" && (
+                  <>
+                    {/* Feature Analytics */}
+                    <div className="grid-2" style={{ gap: 16, marginBottom: 16 }}>
+                      <EntropyChart data={entropyHistory} />
+                      <AdaptiveThresholdPanel sessions={safeSessions} engines={safeEngines} />
+                    </div>
+
+                    {/* Streaming Pipeline */}
+                    <section className="analytics-section" style={{ marginBottom: 16 }}>
+                      <div className="section-title">Live Streaming Pipeline</div>
+                      <StreamingPipeline logs={safeLogLines} sessions={safeSessions} />
+                    </section>
+
+                    {/* Trust & Backtest row */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 16,
+                        marginBottom: 16,
+                      }}
+                    >
+                      {trust?.available && (
+                        <div className="chart-card" style={{ padding: 14 }}>
+                          <div className="chart-header">
+                            <span className="chart-title">Trust Gate — Score de confiance</span>
+                          </div>
+                          <TrustPanel trust={trust} />
+                        </div>
+                      )}
+                      <BacktestAccuracyChart />
+                    </div>
+
+                    {/* Explainable AI (full width, interactive) */}
+                    <section className="analytics-section">
+                      <ExplainabilityPanel
+                        decisions={safeDecisions}
+                        suggestions={suggestions}
+                        trust={explainabilityTrust}
+                        topAlarm={topAlarm}
+                        kpis={kpis ?? null}
+                        engines={safeEngines}
+                      />
+                    </section>
+                  </>
                 )}
               </>
             )}
@@ -428,10 +478,53 @@ export const DashboardPage = () => {
               />
             )}
 
+            {section === "forecast" && <ForecastPanel />}
+
           </div>
         </div>
       </div>
     </>
+  );
+};
+
+// ── TrustPanel extracted to be reused ──
+// (You can keep this inside DashboardPanel or move it to a separate file;
+//  for simplicity, I duplicate it here – in production, extract it to its own file.)
+const TrustPanel: FC<{ trust: TrustData | null }> = ({ trust }) => {
+  if (!trust?.available) return <div>No trust data</div>;
+  const score = trust.confidence_in_metrics ?? 0;
+  const scoreColor = score >= 0.8 ? "#0F6E56" : score >= 0.6 ? "#854F0B" : "#A32D2D";
+  const pct = Math.round(score * 100);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ position: "relative", width: 56, height: 56 }}>
+          <svg viewBox="0 0 56 56" width={56} height={56}>
+            <circle cx={28} cy={28} r={24} fill="none" stroke="var(--color-background-secondary,#f3f4f6)" strokeWidth={5}/>
+            <circle cx={28} cy={28} r={24} fill="none" stroke={scoreColor} strokeWidth={5}
+              strokeDasharray={`${(pct/100)*150.8} 150.8`} strokeLinecap="round" transform="rotate(-90 28 28)"/>
+          </svg>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: scoreColor }}>{pct}%</span>
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>{trust.confidence_label}</div>
+          <div style={{ fontSize: 10, color: "#64748b" }}>Score de confiance</div>
+        </div>
+      </div>
+      {([
+        ["Accord modèles", `${((trust.model_agreement??0)*100).toFixed(0)}%`, (trust.model_agreement??0)>=0.8],
+        ["Taux FP", `${((trust.false_positive_rate??0)*100).toFixed(1)}%`, (trust.false_positive_rate??0)<=0.1],
+        ["Drift", `${trust.drift_score?.toFixed(3)??"—"} (${trust.drift_label})`, !trust.drift_flagged],
+        ["Stabilité", trust.stability, trust.stability==="HIGH"],
+      ] as [string,string,boolean][]).map(([k,v,ok]) => (
+        <div key={k} style={{ display:"flex", justifyContent:"space-between", fontSize:11 }}>
+          <span style={{ color:"var(--muted,#6b7280)" }}>{k}</span>
+          <span style={{ color: ok ? "#0F6E56" : "#A32D2D", fontFamily:"monospace", fontWeight:500 }}>{v}</span>
+        </div>
+      ))}
+    </div>
   );
 };
 

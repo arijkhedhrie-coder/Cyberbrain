@@ -458,7 +458,7 @@ def api_pipeline_latest() -> dict:
     def load():
         events = _latest_jsonl()
         return {
-            "events":     [e for e in events if isinstance(e, dict)][-50:],
+            "events":     [e for e in events if isinstance(e, dict)][-150:],
             "log_lines":  _build_log_lines(events)[-60:],
             "step_count": len(events),
         }

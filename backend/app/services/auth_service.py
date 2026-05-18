@@ -18,6 +18,7 @@ from collections import deque
 from app.core.websocket_broadcast import init_broadcaster
 
 ALARMS_STORE: deque = deque(maxlen=500)
+ACTIVITIES_STORE: deque = deque(maxlen=500)
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="IDPS Dashboard API", version="2.0")
@@ -122,6 +123,17 @@ async def ws_logs(websocket: WebSocket) -> None:
                 "type": "history",
                 "alarms": recent,
                 "count": len(recent),
+            })
+        except Exception:
+            pass
+
+    if ACTIVITIES_STORE:
+        try:
+            recent_activities = list(ACTIVITIES_STORE)[-40:]
+            await websocket.send_json({
+                "type": "activity_history",
+                "activities": recent_activities,
+                "count": len(recent_activities),
             })
         except Exception:
             pass
@@ -290,6 +302,28 @@ def broadcast_metrics(metrics: dict) -> None:
         print(f"[WS][WARN] broadcast_metrics: {e}")
 
 
+def _normalize_activity(activity: dict) -> dict:
+    normalized = dict(activity or {})
+    normalized.setdefault("id", f"act-{uuid.uuid4().hex[:10]}")
+    normalized.setdefault("timestamp", time.strftime("%H:%M:%S"))
+    normalized.setdefault("stage", "session")
+    normalized.setdefault("actor", "System")
+    normalized.setdefault("title", normalized.get("event_type") or "Activity")
+    normalized.setdefault("detail", "")
+    normalized.setdefault("status", "info")
+    normalized.setdefault("severity", "INFO")
+    return normalized
+
+
+def broadcast_activity(activity: dict) -> None:
+    try:
+        normalized = _normalize_activity(activity)
+        ACTIVITIES_STORE.append(normalized)
+        _run_broadcast({"type": "activity", "activity": normalized})
+    except Exception as e:
+        print(f"[WS][WARN] broadcast_activity: {e}")
+
+
 # ── Internal HTTP endpoints for fallback (optional) ───────────────────────────
 from pydantic import BaseModel as _BaseModel
 
@@ -305,10 +339,22 @@ async def internal_broadcast_alarm(payload: _AlarmBroadcastPayload) -> dict:
     return {"ok": True, "store_size": len(ALARMS_STORE)}
 
 
+@app.post("/api/internal/broadcast-log")
+async def internal_broadcast_log(data: dict) -> dict:
+    broadcast_log(data)
+    return {"ok": True}
+
+
 @app.post("/api/internal/broadcast-metrics")
 async def internal_broadcast_metrics(data: dict) -> dict:
     broadcast_metrics(data)
     return {"ok": True}
+
+
+@app.post("/api/internal/broadcast-activity")
+async def internal_broadcast_activity(data: dict) -> dict:
+    broadcast_activity(data)
+    return {"ok": True, "store_size": len(ACTIVITIES_STORE)}
 
 
 @app.post("/api/invalidate-cache")

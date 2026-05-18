@@ -780,6 +780,47 @@ class OutilDeclencherAlarme(BaseTool):
             "Aucune alarme critique", "[]", "", "null", "aucune", "none"
         ):
             return "Aucune alarme à déclencher — système en état normal."
+        
+                # ✅ Ajout : accepter le format "ANOMALIE nb=X ip=Y"
+        if isinstance(alarmes_json, str) and alarmes_json.strip().startswith("ANOMALIE"):
+            import re
+            match_ip = re.search(r'ip=(\S+)', alarmes_json)
+            ip = match_ip.group(1) if match_ip else "unknown"
+            # Forcer une alarme
+            type_alarme = "BRUTE-FORCE SSH"  # ou "ANOMALIE"
+            message = alarmes_json
+            severite = "CRITIQUE"  # ou AVERTISSEMENT
+            notification = (
+                f"ALARME SÉCURITÉ — {type_alarme}\n"
+                f"IP Source: {ip}\nDétail: {message}\n"
+                f"Action immédiate requise: Bloquer {ip}"
+            )
+            print(f"\n{'='*60}")
+            print(notification)
+            print(f"{'='*60}\n")
+            ip_safe = str(ip).replace(".", "_")
+            _appeler_mcp("sauvegarder_rapport_s3", {
+                "contenu":     notification,
+                "nom_fichier": f"alarme_{ip_safe}.json",
+                "type":        "alarme",
+            })
+            # Appel broadcast
+            try:
+                from app.core.websocket_broadcast import broadcast_alarm
+                broadcast_alarm({
+                    "type":      type_alarme,
+                    "source_ip": ip,
+                    "severity":  severite,
+                    "message":   message,
+                    "engine":    "SSH",
+                    "server_id": "auth",
+                })
+            except Exception as e:
+                print(f"[WS][WARN] broadcast depuis declencher_alarme échoué: {e}")
+            return f"Alarme déclenchée pour anomalie : {ip}"
+
+
+
 
         try:
             if isinstance(alarmes_json, (list, dict)):
@@ -852,7 +893,7 @@ class OutilDeclencherAlarme(BaseTool):
             # ✅ [FIX-1] broadcast_alarm correctement indenté dans la boucle for alarme
             # ✅ [FIX-3] server_id propagé depuis l'alarme vers le WebSocket
             try:
-                from api_auth import broadcast_alarm
+                from app.core.websocket_broadcast import broadcast_alarm
                 broadcast_alarm({
                     "type":      type_alarme,
                     "source_ip": ip,
@@ -1038,7 +1079,7 @@ class OutilActionCorrective(BaseTool):
 
             # [C5] Broadcast WebSocket vers le dashboard
             try:
-                from api_auth import broadcast_alarm
+                from app.core.websocket_broadcast import broadcast_alarm
                 broadcast_alarm({
                     "type":              "CORRECTIVE_SUGGESTION",
                     "source_ip":         ip,
@@ -1129,7 +1170,7 @@ class OutilActionCorrective(BaseTool):
                 }
                 print(f"[AUTO_BLOCKED] {raison}")
                 try:
-                    from api_auth import broadcast_alarm
+                    from app.core.websocket_broadcast import broadcast_alarm
                     broadcast_alarm({
                         "type":               "CORRECTIVE_SUGGESTION",
                         "source_ip":          ip,

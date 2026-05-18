@@ -1,89 +1,111 @@
-
-// ────────────────────────────────────────────────────────────────
 // presentation/components/charts/StreamingPipeline.tsx
-// Source : logs[] (WebSocket) + sessions[] (/api/sessions)
-// ────────────────────────────────────────────────────────────────
 import type { StreamingPipelineProps } from "../../../shared/types/analyticsProps";
 
-const PIPELINE_STAGES = [
-  { name: "Log Ingestion",    latency: 12  },
-  { name: "Normalization",    latency: 8   },
-  { name: "Feature Extract",  latency: 45  },
-  { name: "SSH Engine",       latency: 23  },
-  { name: "WEB Engine",       latency: 19  },
-  { name: "FTP Engine",       latency: 11  },
-  { name: "Correlation",      latency: 67  },
-  { name: "Prediction",       latency: 120 },
-  { name: "Trust Gate",       latency: 15  },
-  { name: "Corrective Agent", latency: 340 },
-];
-
-const STATUS_COLOR: Record<string, string> = {
-  ok:   "var(--accent-green)",
-  warn: "var(--accent-amber)",
-  idle: "var(--text-muted)",
-};
-
 export function StreamingPipeline({ logs, sessions }: StreamingPipelineProps) {
-  const isActive   = logs.length > 0;
-  const lastSession = sessions[sessions.length - 1];
-  // Throughput = nb logs traités (logs.length = proxy du débit réel)
-  const throughput = logs.length;
+  const isLive = logs.length > 0;
+  const last = sessions[0] ?? sessions[sessions.length - 1];
+  const normalizedLogs = logs.map((line) => line.toLowerCase());
+  const stageNames = [
+    "Log Ingestion",
+    "Normalization",
+    "Feature Extraction",
+    "SSH Engine",
+    "WEB Engine",
+    "FTP Engine",
+    "Kernel Engine",
+    "Correlation",
+    "Prediction",
+    "Trust Gate",
+    "Corrective Agent",
+  ] as const;
+  type StageName = (typeof stageNames)[number];
+  const stageKeywords: Record<StageName, string[]> = {
+    "Log Ingestion": ["collect", "ingest", "log"],
+    Normalization: ["normal", "transform"],
+    "Feature Extraction": ["feature", "metrics"],
+    "SSH Engine": ["ssh"],
+    "WEB Engine": ["web", "http"],
+    "FTP Engine": ["ftp"],
+    "Kernel Engine": ["kernel"],
+    Correlation: ["correlation", "chain"],
+    Prediction: ["predict"],
+    "Trust Gate": ["trust"],
+    "Corrective Agent": ["agent", "suggestion", "corrective"],
+  };
+
+  const alarmCount = last?.nb_alarms_final;
+  const lastSessionDate = last?.date
+    ? new Date(last.date).toLocaleString("fr-FR")
+    : null;
 
   return (
     <div className="chart-card pipeline-card">
       <div className="chart-header">
         <span className="chart-title">Live Streaming Pipeline</span>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {isActive && <span className="live-dot" />}
-          <span className={isActive ? "badge-ok" : "badge-warn"}>
-            {isActive ? "ACTIF" : "EN ATTENTE"}
+          {isLive && <span className="live-dot" />}
+          <span className={isLive ? "badge-ok" : "badge-warn"}>
+            {isLive ? "ACTIF" : "EN ATTENTE"}
           </span>
-          {lastSession && (
+          {last && (
             <span className="stat-mini">
-              Session #{sessions.length} · {lastSession.nb_alarms_final} alarmes
+              Session #{sessions.length}
+              {alarmCount !== undefined && ` · ${alarmCount} alarmes`}
             </span>
           )}
         </div>
       </div>
 
+      {/* Pipeline stages – conceptual, no fake latencies */}
       <div className="pipeline-stages">
-        {PIPELINE_STAGES.map((stage, i) => {
-          // Statut basé sur les logs réels
-          const status = !isActive ? "idle"
-            : i < Math.min(PIPELINE_STAGES.length, Math.ceil(throughput / 10)) ? "ok"
-            : "warn";
+        {stageNames.map((name, i, arr) => {
+          const isStageActive = normalizedLogs.some((line) =>
+            stageKeywords[name].some((keyword) => line.includes(keyword)),
+          );
 
           return (
-            <div key={stage.name} className="pipeline-stage">
+          <div key={name} className="pipeline-stage">
+            <div
+              className="stage-node"
+              style={{
+                borderColor: isStageActive ? "var(--accent-green)" : "var(--text-muted)",
+              }}
+            >
               <div
-                className="stage-node"
-                style={{ borderColor: STATUS_COLOR[status] }}
-              >
-                <div className="stage-dot" style={{ background: STATUS_COLOR[status] }} />
-                <span className="stage-name">{stage.name}</span>
-                <span className="stage-latency">~{stage.latency}ms</span>
-                <span className="stage-throughput">
-                  {isActive ? `${Math.max(1, throughput - i * 2)}/s` : "—"}
-                </span>
-              </div>
-              {i < PIPELINE_STAGES.length - 1 && (
-                <div className="pipeline-arrow">
-                  <div className="arrow-line" />
-                  <div
-                    className="arrow-head"
-                    style={{ animationPlayState: isActive ? "running" : "paused" }}
-                  >▶</div>
-                </div>
-              )}
+                className="stage-dot"
+                style={{
+                  background: isStageActive ? "var(--accent-green)" : "var(--text-muted)",
+                }}
+              />
+              <span className="stage-name">{name}</span>
+              <span className="stage-throughput">
+                {isStageActive ? "●" : "—"}
+              </span>
             </div>
-          );
-        })}
+            {i < arr.length - 1 && (
+              <div className="pipeline-arrow">
+                <div className="arrow-line" />
+                <div
+                  className="arrow-head"
+                  style={{ animationPlayState: isLive ? "running" : "paused" }}
+                >
+                  ▶
+                </div>
+              </div>
+            )}
+          </div>
+        )})}
       </div>
 
       <div className="chart-footer">
-        <span className="stat-mini">{logs.length} lignes logs traitées</span>
-        <span className="stat-mini">{sessions.length} sessions analysées</span>
+        <span className="stat-mini">{logs.length} lignes logs reçues</span>
+        <span className="stat-mini">{sessions.length} sessions terminées</span>
+        {alarmCount !== undefined && (
+          <span className="stat-mini">Derniere session: {alarmCount} alarmes finales</span>
+        )}
+        {lastSessionDate && (
+          <span className="stat-mini">Maj session: {lastSessionDate}</span>
+        )}
       </div>
     </div>
   );

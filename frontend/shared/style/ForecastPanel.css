@@ -1,0 +1,274 @@
+/* ForecastPanel.css */
+.forecast-container {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  background: #0a0e1a;
+  color: #c9d1e0;
+  padding: 24px 28px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.forecast-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.forecast-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.forecast-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #e2e8f0;
+}
+
+.forecast-score-section {
+  text-align: center;
+  margin: 30px 0;
+}
+
+.forecast-big-score {
+  font-size: 56px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.forecast-big-score small {
+  font-size: 28px;
+}
+
+.forecast-score-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 8px;
+}
+
+.forecast-risk-level {
+  margin-bottom: 24px;
+}
+
+.forecast-risk-level-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.forecast-risk-badge {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: 20px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.forecast-chart-section {
+  margin-bottom: 32px;
+}
+
+.forecast-chart-title {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.forecast-svg-chart {
+  display: block;
+  margin: 0 auto;
+}
+
+.forecast-flags-section {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+}
+
+.forecast-flags-title {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.forecast-event-item {
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(139, 92, 246, 0.13);
+  color: #a78bfa;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.forecast-flag-item {
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.13);
+  color: #f59e0b;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.forecast-prevention-section {
+  margin-bottom: 24px;
+}
+
+.forecast-prevention-title {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.forecast-suggestion-box {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.forecast-suggestion-item {
+  padding: 6px 0;
+  color: #22c55e;
+  font-size: 11px;
+  border-bottom: 1px solid #374151;
+}
+
+.forecast-suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.forecast-footer {
+  font-size: 10px;
+  color: #475569;
+  text-align: center;
+  margin-top: 24px;
+}
+
+.forecast-loading,
+.forecast-empty {
+  padding: 40px 20px;
+  color: #64748b;
+  text-align: center;
+  font-size: 13px;
+}
+/* Circular gauge */
+.forecast-hero {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 32px;
+  justify-content: center;
+}
+
+.forecast-gauge {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  flex-shrink: 0;
+}
+
+.forecast-gauge-value {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 36px;
+  font-weight: 700;
+}
+
+.forecast-gauge-value small {
+  font-size: 20px;
+}
+
+.forecast-hero-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Evolution chart */
+.forecast-evolution-chart {
+  display: block;
+  margin: 0 auto;
+}
+
+/* Signal intelligence grid */
+.forecast-signals-grid {
+  margin-bottom: 28px;
+}
+
+.forecast-signal-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.forecast-signal-card {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+}
+
+.forecast-signal-name {
+  font-size: 10px;
+  color: #64748b;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.forecast-signal-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin-bottom: 4px;
+}
+
+.forecast-signal-trend {
+  font-size: 14px;
+  color: #64748b;
+}
+
+/* Attack phases */
+.forecast-phases {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.forecast-phase {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: #1e293b;
+}
+
+.forecast-phase.active {
+  color: #e2e8f0;
+  background: #1e293b;
+  border: 1px solid currentColor;
+}
+
+.forecast-phase-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}

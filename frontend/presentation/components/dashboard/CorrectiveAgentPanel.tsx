@@ -5,7 +5,7 @@
 //
 // Ce composant garde son propre fetch uniquement pour :
 //   - agentMode  (mode + phase description)
-//   - stats      (totaux approvés/rejetés)
+//   - stats      (totaux approuvés/rejetés)
 //   - validate() (POST /api/corrective/validate)
 //   - changeMode() (POST /api/corrective/mode)
 //
@@ -28,7 +28,7 @@ interface AgentMode {
   pending_count:        number;
 }
 
-interface Stats {
+interface SessionStats {
   total:          number;
   pending:        number;
   approved:       number;
@@ -36,6 +36,16 @@ interface Stats {
   modified:       number;
   avg_confidence: number;
 }
+
+interface Stats extends SessionStats {
+  session: SessionStats;
+  memory?: Record<string, unknown>;
+}
+
+const normalizeStats = (stats: Stats): Stats => ({
+  ...stats,
+  ...stats.session,
+});
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -83,6 +93,20 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
   const [newMode,      setNewMode]      = useState("");
   const [newThreshold, setNewThreshold] = useState("");
 
+  // ⬇️ ÉTATS LOCAUX POUR MISE À JOUR INSTANTANÉE
+  const [localSuggestions, setLocalSuggestions] = useState<CorrectiveSuggestion[]>(suggestions);
+  const [localStats, setLocalStats] = useState<Stats | null>(null);
+
+  // Synchronisation avec la prop suggestions (polling parent)
+  useEffect(() => {
+    setLocalSuggestions(suggestions);
+  }, [suggestions]);
+
+  // Synchronisation avec stats venant du fetchMeta
+  useEffect(() => {
+    if (stats) setLocalStats(stats);
+  }, [stats]);
+
   const token   = localStorage.getItem("access_token") || localStorage.getItem("token") || "";
   const headers = { "Content-Type": "application/json", "Authorization": `Bearer ${token}` };
 
@@ -100,8 +124,9 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
       }
       if (statRes.ok) {
         const statData = await statRes.json();
-        setStats(statData);
-        console.log("[CorrectiveAgentPanel] stats fetched:", statData);
+        const normalizedStats = normalizeStats(statData);
+        setStats(normalizedStats);
+        console.log("[CorrectiveAgentPanel] stats fetched:", normalizedStats);
       }
     } catch (err) {
       console.error("[CorrectiveAgentPanel] fetch error:", err);
@@ -131,10 +156,39 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
       });
       const data = await res.json();
       setFeedback(`${data.status} — ${data.message}`);
+      
+      // ⬇️ MISE À JOUR IMMÉDIATE DE L'INTERFACE
+      // 1. Supprimer la suggestion de la liste locale
+      setLocalSuggestions(prev => prev.filter(s => s.suggestion_id !== selected.suggestion_id));
+      // 2. Mettre à jour les stats locales
+      setLocalStats(prev => {
+        if (!prev) return prev;
+        const delta = {
+          APPROVE: { approved: 1, pending: -1, rejected: 0, modified: 0 },
+          REJECT:  { approved: 0, pending: -1, rejected: 1, modified: 0 },
+          MODIFY:  { approved: 0, pending: -1, rejected: 0, modified: 1 },
+        }[decision];
+        return {
+          ...prev,
+          pending: prev.pending + delta.pending,
+          approved: prev.approved + delta.approved,
+          rejected: prev.rejected + delta.rejected,
+          modified: prev.modified + delta.modified,
+          session: {
+            ...prev.session,
+            pending: prev.session.pending + delta.pending,
+            approved: prev.session.approved + delta.approved,
+            rejected: prev.session.rejected + delta.rejected,
+            modified: prev.session.modified + delta.modified,
+            // avg_confidence: on ne recalcule pas ici, le polling le fera
+          },
+        };
+      });
+      
       setSelected(null);
       setModifiedCmd("");
       setAdminNote("");
-      // Refresh meta (stats) après validation
+      // Refresh meta (stats) après validation (en arrière-plan)
       fetchMeta();
     } catch {
       setFeedback("Erreur réseau — vérifiez le backend.");
@@ -168,8 +222,8 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
     }
   };
 
-  // ── Données dérivées ──────────────────────────────────────────────────────
-  const pending = suggestions.filter(s => s.status === "PENDING");
+  // ── Données dérivées (utilise les états locaux) ────────────────────────────
+  const pending = localSuggestions.filter(s => s.status === "PENDING");
   const colors  = PHASE_COLORS[agentMode?.mode ?? "SUGGESTION"];
   const modeKey = agentMode?.mode ?? "SUGGESTION";
 
@@ -183,7 +237,6 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
       borderRadius: 10,
       border: "1px solid rgba(255,255,255,0.07)",
     }}>
-
       {/* ── Header ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
         <div style={{
@@ -272,20 +325,20 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
         </div>
       )}
 
-      {/* ── Stats bar ── */}
-            {stats && (
+      {/* ── Stats bar (utilise localStats) ── */}
+      {localStats && (
         <div style={{
           display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 16,
         }}>
           {([
-            { label: "TOTAL",        value: stats.total,    color: "#64748b" },
-            { label: "EN ATTENTE",   value: stats.pending,  color: "#f59e0b" },
-            { label: "APPROUVÉS",    value: stats.approved, color: "#22c55e" },
-            { label: "REJETÉS",      value: stats.rejected, color: "#ef4444" },
+            { label: "TOTAL", value: localStats.session.total, color: "#64748b" },
+            { label: "EN ATTENTE", value: localStats.session.pending, color: "#f59e0b" },
+            { label: "APPROUVÉS", value: localStats.session.approved, color: "#22c55e" },
+            { label: "REJETÉS", value: localStats.session.rejected, color: "#ef4444" },
             {
               label: "CONF. MOY.",
-              value: `${((isFinite(stats.avg_confidence) ? stats.avg_confidence : 0) * 100).toFixed(0)}%`,
-              color: CONFIDENCE_COLOR(isFinite(stats.avg_confidence) ? stats.avg_confidence : 0),
+              value: `${((isFinite(localStats.session.avg_confidence) ? localStats.session.avg_confidence : 0) * 100).toFixed(0)}%`,
+              color: CONFIDENCE_COLOR(isFinite(localStats.session.avg_confidence) ? localStats.session.avg_confidence : 0),
             },
           ] as { label: string; value: string | number; color: string }[]).map(({ label, value, color }) => (
             <div key={label} style={{
@@ -350,7 +403,7 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
         </div>
       </div>
 
-      {/* ── Liste suggestions PENDING ── */}
+      {/* ── Liste suggestions PENDING (utilise localSuggestions) ── */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 1.5, marginBottom: 10 }}>
           SUGGESTIONS EN ATTENTE ({pending.length})
@@ -372,14 +425,14 @@ export const CorrectiveAgentPanel: FC<Props> = ({ suggestions, wsConnected }) =>
                 ? "Agent en mode TRAINING — il collecte des exemples pour améliorer ses décisions."
                 : "Prêt à recevoir des suggestions du système. Les alarmes critiques déclencheront des suggestions."}
             </div>
-            {stats && stats.approved > 0 && (
+            {localStats && localStats.session.approved > 0 && (
               <div style={{
                 fontSize: 10, padding: "8px 12px", borderRadius: 6,
                 background: "rgba(29,158,117,0.1)", color: "#1D9E75",
                 fontFamily: "monospace", marginTop: 8, display: "inline-block",
                 border: "1px solid rgba(29,158,117,0.2)",
               }}>
-                📊 {stats.approved} suggestion{stats.approved > 1 ? "s" : ""} approuvée{stats.approved > 1 ? "s" : ""} • {stats.rejected} rejetée{stats.rejected > 1 ? "s" : ""}
+                📊 {localStats.approved} suggestion{localStats.approved > 1 ? "s" : ""} approuvée{localStats.approved > 1 ? "s" : ""} • {localStats.rejected} rejetée{localStats.rejected > 1 ? "s" : ""}
               </div>
             )}
           </div>

@@ -10,12 +10,33 @@ import inspect
 import re as _re
 from datetime import datetime
 from typing import Any
+
+if __name__ == "__main__" and "--backtest" in sys.argv:
+    import argparse
+
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+    parser = argparse.ArgumentParser(description="IDPS Pipeline")
+    parser.add_argument("--backtest", action="store_true")
+    parser.add_argument("--sessions", type=int, default=3)
+    args, _ = parser.parse_known_args()
+
+    if args.backtest:
+        from app.ai.engines.backtester import main_backtest
+
+        main_backtest(n_sessions=args.sessions)
+        raise SystemExit(0)
+
 import requests as _req
 import boto3
 import pandas as pd
 from botocore.config import Config as BotoConfig
 from dotenv import load_dotenv
-
+from collections import deque
 # CORRECTION 1 : chemin complet vers crewai_compat (app/ai/tools/)
 from app.ai.tools.crewai_compat import patch_legacy_rag_storage_for_ollama
 
@@ -96,7 +117,7 @@ else:
 # WebSocket bridge
 # ─────────────────────────────────────────────────────────────────────────────
 try:
-    from app.core.websocket_broadcast import broadcast_alarm, broadcast_log, broadcast_metrics
+    from app.core.websocket_broadcast import broadcast_activity, broadcast_alarm, broadcast_log, broadcast_metrics
     WS_ENABLED = True
     LOG.info("[WS] broadcast functions loaded from central module")
 except ImportError as _ws_import_err:
@@ -123,6 +144,9 @@ except ImportError as _ws_import_err:
 
     def broadcast_metrics(data: dict) -> None:
         _http_post("broadcast-metrics", data)
+
+    def broadcast_activity(data: dict) -> None:
+        return
 
     if FALLBACK_ENABLED:
         LOG.info("[WS] HTTP fallback enabled (endpoints must exist in FastAPI).")
@@ -532,6 +556,7 @@ try:
     from app.core.logging_utils import SessionLogger
 except Exception:
     class SessionLogger:
+        def _emit(self, event_type: str, payload: dict): LOG.info("%s %s", event_type, payload)
         def pipeline_start(self, **kwargs): LOG.info("pipeline_start %s", kwargs)
         def metrics_computed(self, summary): LOG.info("metrics_computed %s", summary)
         def pass1_complete(self, alarmes, **kwargs): LOG.info("pass1_complete alarms=%s", len(alarmes) if hasattr(alarmes, "__len__") else "n/a")
@@ -907,7 +932,7 @@ def _run_dynamic_config(log: SessionLogger, agent_inputs: dict) -> DynamicConfig
         log.warning("dynamic_config", f"{type(e).__name__}: {e} — defaults")
         return DynamicConfig.default()
 
-
+PREDICTION_HISTORY = deque(maxlen=30)
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1000,6 +1025,73 @@ def main() -> None:
         metrics_summary = get_summary_for_detector(erreurs_par_heure, tentatives_par_ip, df_clean=df)
         log.metrics_computed(metrics_summary)
 
+
+        # ── Prediction engine ─────────────────────────────────────────
+        # ── Enhanced prediction emission ───────────────────────────
+        try:
+            from app.ai.engines.prediction_engine import run_prediction_engine
+            from app.core.adapter import normalize
+
+            df_norm = normalize(df, verbose=False)
+            prediction = run_prediction_engine(df_norm)
+            signals = prediction.get("signals", {})
+
+            # Build signal analysis
+            signal_analysis = {
+                "failures": signals.get("failures", {}),
+                "unique_ips": signals.get("unique_ips", {}),
+                "usernames": signals.get("usernames", {}),
+                "ftp_events": signals.get("ftp_events", {}),
+                "kernel_errors": signals.get("kernel_errors", {}),
+            }
+
+            # Build explainability
+            explanations = []
+
+            if signals.get("failures", {}).get("burst_ratio", 0) >= 2:
+                explanations.append(
+                    "SSH authentication failures increasing abnormally"
+                )
+
+            if signals.get("unique_ips", {}).get("trend_ratio", 0) >= 1.25:
+                explanations.append(
+                    "Multiple distributed IPs detected — potential botnet warmup"
+                )
+
+            if signals.get("usernames", {}).get("burst_ratio", 0) >= 2:
+                explanations.append(
+                    "Username diversity spike observed — spray phase likely"
+                )
+
+            if signals.get("ftp_events", {}).get("burst_ratio", 0) >= 2:
+                explanations.append(
+                    "FTP retrieval behavior abnormal — possible data exfiltration"
+                )
+
+            if signals.get("kernel_errors", {}).get("trend_ratio", 0) >= 1.25:
+                explanations.append(
+                    "Kernel instability increasing — system crash risk elevated"
+                )
+
+            # Store history
+            PREDICTION_HISTORY.append({
+                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                "score": prediction.get("prediction_score", 0),
+                "flags": prediction.get("flags", []),
+            })
+
+        except Exception as e:
+            log.warning("prediction", f"skipped: {type(e).__name__}: {e}")
+
+            prediction = {
+                "prediction_score": 0,
+                "flags": [],
+                "predicted_events": [],
+                "signals": {},
+            }
+
+            signal_analysis = {}
+            explanations = []
         drift_info     = compute_drift_score(metrics_summary.get("taux_anomalies", 0.0))
         stability_info = compute_session_stability(n_sessions=3)
         metrics_summary["drift_score"]       = drift_info["drift_score"]
@@ -1140,7 +1232,16 @@ def main() -> None:
             )
 
             try:
+                log._emit("ANALYSIS_CREW_STARTED", {
+                    "agents": ["Collecteur", "Analyste", "Détecteur"],
+                    "nb_anomalies": nb_anomalies,
+                    "ip_principale": ip_principale,
+                })
                 crew_out = analysis_crew.kickoff(inputs=agent_inputs)
+                log._emit("ANALYSIS_CREW_COMPLETED", {
+                    "agents": ["Collecteur", "Analyste", "Détecteur"],
+                    "result_excerpt": str(crew_out)[:300],
+                })
                 parts.append(str(crew_out))
                 LOG.info("Crew A réussi")
             except Exception as e:
@@ -1165,7 +1266,15 @@ def main() -> None:
                 verbose=True,
             )
             try:
+                log._emit("REPORT_CREW_STARTED", {
+                    "agents": ["Rapporteur"],
+                    "pass2_ran": pass2_ran,
+                })
                 report_out = report_crew.kickoff(inputs=agent_inputs)
+                log._emit("REPORT_CREW_COMPLETED", {
+                    "agents": ["Rapporteur"],
+                    "result_excerpt": str(report_out)[:300],
+                })
                 parts.append(f"[REPORT_AGENT]\n{report_out}")
             except Exception as e:
                 log.warning("report_crew", f"{type(e).__name__}: {e}")
@@ -1183,9 +1292,44 @@ def main() -> None:
 
             # Action corrective
             try:
+                log._emit("CORRECTIVE_TOOL_STARTED", {
+                    "nb_anomalies": nb_anomalies,
+                    "ip_principale": ip_principale,
+                })
                 corr = _run_safe_corrective_action(
                     nb_anomalies, ip_principale, alarmes_final, outil_correctif
                 )
+                corr_title = "Corrective action evaluated"
+                corr_status = "completed"
+                corr_mode = None
+                corr_action_type = None
+                corr_confidence = None
+                try:
+                    corr_payload = json.loads(corr) if isinstance(corr, str) else {}
+                    corr_mode = corr_payload.get("mode")
+                    corr_confidence = corr_payload.get("confidence")
+                    action_payload = corr_payload.get("action_suggeree") or {}
+                    if isinstance(action_payload, dict):
+                        corr_action_type = action_payload.get("type")
+                    if corr_mode == "SUGGESTION":
+                        corr_title = "Corrective suggestion generated"
+                        corr_status = "pending"
+                    elif corr_mode == "AUTO_BLOCKED":
+                        corr_title = "Corrective auto mode blocked"
+                        corr_status = "blocked"
+                    elif corr_mode == "AUTO":
+                        corr_title = "Automatic corrective action executed"
+                        corr_status = "executed"
+                except Exception:
+                    pass
+                log._emit("CORRECTIVE_TOOL_COMPLETED", {
+                    "title": corr_title,
+                    "result_excerpt": str(corr)[:300],
+                    "status": corr_status,
+                    "mode": corr_mode,
+                    "action_type": corr_action_type,
+                    "confidence": corr_confidence,
+                })
                 parts.append(f"[CORRECTIVE_TOOL]\n{corr}")
             except Exception as e:
                 log.warning("corrective_tool", f"{type(e).__name__}: {e}")
@@ -1225,6 +1369,18 @@ def main() -> None:
             uploader_vers_s3()
         except Exception as e:
             log.warning("upload_s3", f"{type(e).__name__}: {e}")
+        
+        # Add prediction to the session summary that goes into the JSONL
+        # Emit enhanced event
+        log._emit("PREDICTION_COMPUTED", {
+            "prediction_score": prediction.get("prediction_score", 0),
+            "flags": prediction.get("flags", []),
+            "predicted_events": prediction.get("predicted_events", []),
+            "signals": prediction.get("signals", {}),
+            "signal_analysis": signal_analysis,
+            "explanations": explanations,
+            "history": list(PREDICTION_HISTORY),
+        })
 
         sauvegarder_memoire({
             "ips_suspectes":         _ips_suspectes(df, anomalies, k=5),

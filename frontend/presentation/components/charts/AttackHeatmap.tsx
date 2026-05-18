@@ -1,8 +1,4 @@
-
-// ────────────────────────────────────────────────────────────────
 // presentation/components/charts/AttackHeatmap.tsx
-// Source : alarms[].timestamp + alarms[].engine + alarms[].score
-// ────────────────────────────────────────────────────────────────
 import type { AttackHeatmapProps } from "../../../shared/types/analyticsProps";
 
 const ENGINE_TYPES = ["SSH", "WEB", "FTP", "SESSION", "KERNEL"];
@@ -17,11 +13,18 @@ function intensityColor(v: number): string {
 }
 
 export function AttackHeatmap({ alarms }: AttackHeatmapProps) {
-  // Calcul heatmap depuis alarms réelles
   const cellMap = new Map<string, number>();
   alarms.forEach(a => {
-    const hour = parseInt(a.timestamp.split(":")[0], 10);
-    if (isNaN(hour)) return;
+    let hour: number;
+    // Try to parse the timestamp as an ISO date string
+    const date = new Date(a.timestamp);
+    if (!isNaN(date.getTime())) {
+      hour = date.getHours();
+    } else {
+      // Fallback to old logic (e.g., "HH:MM:SS" format)
+      hour = parseInt(a.timestamp.split(":")[0], 10);
+    }
+    if (isNaN(hour) || hour < 0 || hour > 23) return;
     const key = `${a.engine}:${hour}`;
     cellMap.set(key, (cellMap.get(key) ?? 0) + (a.score / 10));
   });

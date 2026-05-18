@@ -26,3 +26,5 @@ prototype/backend/__pycache__/
 *.bak
 backend/app/*.tmp
 backend/app/*.bak
+backend/app/models/threshold_change_log.json
+

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 from collections import deque
 from typing import Any, Callable, Awaitable, Optional
@@ -15,6 +16,7 @@ _pending_lock = threading.Lock()
 _event_loop: Optional[asyncio.AbstractEventLoop] = None
 _broadcast_raw: Optional[Callable[[dict], Awaitable[None]]] = None
 _initialized: bool = False
+_fallback_warned: bool = False
 
 
 def init_broadcaster(
@@ -51,8 +53,72 @@ def init_broadcaster(
     logger.info("Broadcaster initialised (queue size before init: %d)", len(_pending))
 
 
+def _http_fallback_enabled() -> bool:
+    return os.getenv("WS_FALLBACK_ENABLED", "true").lower() == "true"
+
+
+def _http_fallback_base_url() -> str:
+    return os.getenv("WS_INTERNAL_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
+def _http_fallback_payload(payload: dict) -> tuple[str, dict] | None:
+    msg_type = str(payload.get("type") or "")
+    if msg_type == "alarm":
+        return (
+            "broadcast-alarm",
+            {
+                "alarm": payload.get("alarm", {}),
+                "stage": payload.get("stage", "pass1"),
+                "server_id": payload.get("server_id", "server1"),
+            },
+        )
+    if msg_type == "log":
+        return ("broadcast-log", {"line": payload.get("line", "")})
+    if msg_type == "metrics":
+        return ("broadcast-metrics", payload.get("data", {}))
+    if msg_type == "activity":
+        return ("broadcast-activity", payload.get("activity", {}))
+    return None
+
+
+def _try_http_fallback(payload: dict) -> bool:
+    global _fallback_warned
+
+    if not _http_fallback_enabled():
+        return False
+
+    endpoint_payload = _http_fallback_payload(payload)
+    if endpoint_payload is None:
+        return False
+
+    endpoint, body = endpoint_payload
+
+    try:
+        import requests
+
+        response = requests.post(
+            f"{_http_fallback_base_url()}/api/internal/{endpoint}",
+            json=body,
+            timeout=1.5,
+        )
+        if response.ok:
+            return True
+        logger.warning(
+            "HTTP fallback for %s failed with status %s",
+            payload.get("type", "unknown"),
+            response.status_code,
+        )
+    except Exception as exc:
+        if not _fallback_warned:
+            logger.warning("HTTP fallback unavailable: %s", exc)
+            _fallback_warned = True
+    return False
+
+
 def _run_broadcast(payload: dict) -> None:
     if not _initialized or _event_loop is None or _broadcast_raw is None or _event_loop.is_closed():
+        if _try_http_fallback(payload):
+            return
         with _pending_lock:
             _pending.append(payload)
             logger.debug("Broadcaster not ready, queued message (queue size=%d)", len(_pending))
@@ -70,3 +136,6 @@ def broadcast_log(data: dict) -> None:
 
 def broadcast_metrics(data: dict) -> None:
     _run_broadcast({"type": "metrics", "data": data})
+
+def broadcast_activity(data: dict) -> None:
+    _run_broadcast({"type": "activity", "activity": data})

@@ -10,14 +10,25 @@ interface SessionStats {
   threat:       string;
 }
 
-type Section = "dashboard" | "track" | "corrective";
+interface PredictionSummary {
+  available:       boolean;
+  prediction_score: number;
+  flags:           string[];
+  predicted_events: string[];
+  message?:        string;
+  risk_level:      string;
+  prevention_suggestions: string[];
+}
+
+type Section = "dashboard" | "track" | "corrective" | "forecast";
 
 interface Props {
-  activeSection:   Section;
-  onSectionChange: (s: Section) => void;
-  username:        string;
-  onLogout:        () => void;
-  sessionStats?:   SessionStats;
+  activeSection:    Section;
+  onSectionChange:  (s: Section) => void;
+  username:         string;
+  onLogout:         () => void;
+  sessionStats?:    SessionStats;
+  prediction?:      PredictionSummary;
 }
 
 // ── SVG Icons ────────────────────────────────────────────────
@@ -46,14 +57,6 @@ const IconCorrective = ({ active }: { active: boolean }) => (
   </svg>
 );
 
-const IconUser = () => (
-  <svg viewBox="0 0 14 14" width={13} height={13} fill="none"
-    stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-    <circle cx="7" cy="4" r="2"/>
-    <path d="M3 11c0-2.2 1.8-4 4-4s4 1.8 4 4"/>
-  </svg>
-);
-
 const IconStar = () => (
   <svg viewBox="0 0 14 14" width={13} height={13} fill="none"
     stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -61,29 +64,6 @@ const IconStar = () => (
   </svg>
 );
 
-const IconLog = () => (
-  <svg viewBox="0 0 14 14" width={13} height={13} fill="none"
-    stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-    <rect x="1" y="2" width="12" height="10" rx="1.5"/>
-    <path d="M1 5h12M4 2v3"/>
-  </svg>
-);
-
-const IconAlarm = () => (
-  <svg viewBox="0 0 14 14" width={13} height={13} fill="none"
-    stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-    <path d="M3 9h8L9 5a2 2 0 00-4 0L3 9z"/>
-    <path d="M5.5 9v.5a1.5 1.5 0 003 0V9M7 2v1"/>
-  </svg>
-);
-
-const IconSettings = () => (
-  <svg viewBox="0 0 14 14" width={13} height={13} fill="none"
-    stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-    <circle cx="7" cy="7" r="2"/>
-    <path d="M7 1v1.5M7 11.5V13M1 7h1.5M11.5 7H13M3.2 3.2l1 1M9.8 9.8l1 1M10.8 3.2l-1 1M4.2 9.8l-1 1"/>
-  </svg>
-);
 
 const IconChevron = () => (
   <svg viewBox="0 0 14 14" width={12} height={12} fill="none"
@@ -126,6 +106,7 @@ export const Sidebar: FC<Props> = ({
   activeSection,
   onSectionChange,
   onLogout,
+  prediction,
   sessionStats = { session: 0, logsAnalysed: 0, lastUpdate: "—", threat: "NORMAL" },
 }) => {
   const [collapsed, setCollapsed] = useState(false);
@@ -184,6 +165,15 @@ export const Sidebar: FC<Props> = ({
           countVariant="purple"
           icon={<IconCorrective active={activeSection === "corrective"} />}
         />
+          <NavBtn
+          label="Prévision"
+          tooltip="Prévision"
+          active={activeSection === "forecast"}
+          onClick={() => onSectionChange("forecast")}
+          count={prediction?.available ? `${prediction.prediction_score}%` : undefined}
+          countVariant="cyan"
+          icon={<IconStar />}   // you can use any icon, e.g. IconStar already exists
+        />
 
         {/* ── System block ── */}
         <div className="sidebar__system">
@@ -200,6 +190,49 @@ export const Sidebar: FC<Props> = ({
             <span>Logs</span>
             <span className="sidebar__system-val">{sessionStats.logsAnalysed.toLocaleString()}</span>
           </div>
+          <div className="sidebar__system-row">
+            <span>Prévision</span>
+            <span className="sidebar__system-val">
+              {prediction
+                ? prediction.available
+                  ? `${prediction.prediction_score}%`
+                  : "N/A"
+                : "…"}
+            </span>
+          </div>
+          {prediction?.available && (
+            <div className="sidebar__system-card" style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
+                Détail prévision
+              </div>
+              <div style={{ fontSize: 11, color: "#e2e8f0", marginBottom: 4 }}>
+                Risque: <span style={{
+                  color: prediction.risk_level === "CRITICAL" ? "#ef4444" :
+                         prediction.risk_level === "HIGH" ? "#f59e0b" : "#22c55e"
+                }}>{prediction.risk_level}</span>
+              </div>
+              {prediction.message && (
+                <div style={{ fontSize: 10, color: "#cbd5e1", marginBottom: 4 }}>
+                  {prediction.message}
+                </div>
+              )}
+              {prediction.predicted_events.length > 0 && (
+                <div style={{ fontSize: 10, color: "#cbd5e1", marginBottom: 4 }}>
+                  Événements: {prediction.predicted_events.slice(0, 2).join(", ")}
+                </div>
+              )}
+              {prediction.flags.length > 0 && (
+                <div style={{ fontSize: 10, color: "#fde68a", marginBottom: 4 }}>
+                  Signaux: {prediction.flags.slice(0, 2).join(", ")}
+                </div>
+              )}
+              {prediction.prevention_suggestions.length > 0 && (
+                <div style={{ fontSize: 10, color: "#22c55e" }}>
+                  Prévention: {prediction.prevention_suggestions[0]}
+                </div>
+              )}
+            </div>
+          )}
           <div className="sidebar__system-row">
             <span>MAJ</span>
             <span className="sidebar__system-val">{sessionStats.lastUpdate}</span>

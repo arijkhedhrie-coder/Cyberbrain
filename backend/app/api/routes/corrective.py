@@ -88,6 +88,22 @@ def change_mode(payload: ModeChange) -> dict:
     if payload.new_threshold is not None:
         os.environ["CONFIDENCE_THRESHOLD"] = str(payload.new_threshold)
 
+    _broadcast_activity({
+        "id": f"corrective-mode-{datetime.now().timestamp()}",
+        "timestamp": datetime.now().isoformat(),
+        "stage": "corrective",
+        "actor": "Admin",
+        "title": "Corrective mode updated",
+        "detail": f"Mode switched to {payload.new_mode}.",
+        "status": "completed",
+        "severity": "INFO",
+        "progress": 96,
+        "meta": {
+            "mode": payload.new_mode,
+            "threshold": payload.new_threshold,
+        },
+    })
+
     return {
         "status":    "updated",
         "new_mode":  payload.new_mode,
@@ -118,6 +134,27 @@ def store_suggestion(payload: SuggestionPayload) -> dict:
         })
     except Exception as e:
         print(f"[WS][WARN] broadcast suggestion: {e}")
+
+    _broadcast_activity({
+        "id": f"corrective-suggestion-{sid}",
+        "timestamp": _pending_suggestions[sid]["timestamp"],
+        "stage": "corrective",
+        "actor": "Corrective Agent",
+        "title": "Corrective suggestion queued",
+        "detail": str(payload.description),
+        "status": "pending",
+        "severity": str(payload.severity or "HIGH").upper(),
+        "progress": 92,
+        "meta": {
+            "suggestion_id": sid,
+            "anomaly_type": payload.anomaly_type,
+            "ip": payload.ip,
+            "action_type": payload.action_type,
+            "confidence": payload.confidence,
+            "mode": payload.mode,
+            "command": payload.command,
+        },
+    })
     return {"suggestion_id": sid, "status": "PENDING"}
 
 
@@ -166,6 +203,25 @@ def validate_suggestion(decision: ValidationDecision) -> dict:
         _pending_suggestions[sid]["status"] = "APPROVED"
 
         _broadcast_corrective_result(suggestion, result, "EXECUTED")
+        _broadcast_activity({
+            "id": f"corrective-validation-{sid}",
+            "timestamp": timestamp,
+            "stage": "corrective",
+            "actor": "Admin + Corrective Agent",
+            "title": "Suggestion approved and executed",
+            "detail": f"{suggestion.get('description', '')} -> {str(result)[:140]}",
+            "status": "executed",
+            "severity": str(suggestion.get("severity") or "HIGH").upper(),
+            "progress": 98,
+            "meta": {
+                "suggestion_id": sid,
+                "decision": decision.decision,
+                "ip": suggestion.get("ip"),
+                "action_type": suggestion.get("action_type"),
+                "command": command,
+                "confidence": suggestion.get("confidence"),
+            },
+        })
         # ✅ Apprentissage bonne décision + compteur stats
         learn_from_feedback("APPROVE", suggestion)
 
@@ -184,6 +240,24 @@ def validate_suggestion(decision: ValidationDecision) -> dict:
 
         _log_training_feedback(suggestion, decision="REJECT", note=decision.admin_note)
         _broadcast_corrective_result(suggestion, "Rejeté par l'administrateur.", "REJECTED")
+        _broadcast_activity({
+            "id": f"corrective-validation-{sid}",
+            "timestamp": timestamp,
+            "stage": "corrective",
+            "actor": "Admin",
+            "title": "Suggestion rejected",
+            "detail": decision.admin_note or str(suggestion.get("description", "")),
+            "status": "warning",
+            "severity": "HIGH",
+            "progress": 96,
+            "meta": {
+                "suggestion_id": sid,
+                "decision": decision.decision,
+                "ip": suggestion.get("ip"),
+                "action_type": suggestion.get("action_type"),
+                "confidence": suggestion.get("confidence"),
+            },
+        })
         # ✅ Apprentissage faux positif + compteur stats
         learn_from_feedback("REJECT", suggestion)
 
@@ -212,6 +286,26 @@ def validate_suggestion(decision: ValidationDecision) -> dict:
 
         _log_training_feedback(suggestion, decision="MODIFY", modified_cmd=decision.modified_command)
         _broadcast_corrective_result(suggestion, result, "MODIFIED_EXECUTED")
+        _broadcast_activity({
+            "id": f"corrective-validation-{sid}",
+            "timestamp": timestamp,
+            "stage": "corrective",
+            "actor": "Admin + Corrective Agent",
+            "title": "Suggestion modified and executed",
+            "detail": f"{suggestion.get('description', '')} -> {str(result)[:140]}",
+            "status": "executed",
+            "severity": str(suggestion.get("severity") or "HIGH").upper(),
+            "progress": 98,
+            "meta": {
+                "suggestion_id": sid,
+                "decision": decision.decision,
+                "ip": suggestion.get("ip"),
+                "action_type": suggestion.get("action_type"),
+                "original_command": suggestion.get("command", ""),
+                "modified_command": decision.modified_command,
+                "confidence": suggestion.get("confidence"),
+            },
+        })
         # ✅ Apprentissage correction admin (MODIFY, pas APPROVE) + commande améliorée + compteur stats
         learn_from_feedback("MODIFY", suggestion, modified_command=decision.modified_command)
 
@@ -307,6 +401,14 @@ def _safe_execute(command: str, simulation: bool = True) -> str:
         return "Timeout — commande trop longue."
     except Exception as e:
         return f"Erreur d'exécution : {e}"
+
+
+def _broadcast_activity(payload: dict) -> None:
+    try:
+        from app.core.websocket_broadcast import broadcast_activity
+        broadcast_activity(payload)
+    except Exception as e:
+        print(f"[WS][WARN] Broadcast activity corrective: {e}")
 
 
 def _log_training_feedback(suggestion: dict, decision: str, note: str = None,

@@ -40,7 +40,7 @@ if not logger.handlers:
     logger.addHandler(_h)
 logger.setLevel(logging.INFO)
 
-MEMORY_FILE = "long_term_memory.json"
+MEMORY_FILE = str(Path(__file__).resolve().parents[2] / "long_term_memory.json")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -505,9 +505,15 @@ def _save_backtest_results(report: dict, memory_file: str = MEMORY_FILE) -> None
             except Exception as e:
                 logger.warning("Could not save backtest results: %s", e)
                 return
+
+
+def main_backtest(n_sessions: int = 3) -> None:
     """
-    Standalone backtest runner. Reads only — no alarms, no S3, no memory writes.
+    CLI entry point called from app.main.
+
+    Runs the read-only backtest flow against the app memory file and prints the
+    summary to stdout for terminal use.
     """
     print("\n[BACKTEST] Running in read-only mode (no alarms, no uploads).")
-    report = run_backtest(n_sessions=n_sessions, verbose=True)
+    report = run_backtest(n_sessions=n_sessions, memory_file=MEMORY_FILE, verbose=True)
     print(f"\n[BACKTEST] {report['summary']}")

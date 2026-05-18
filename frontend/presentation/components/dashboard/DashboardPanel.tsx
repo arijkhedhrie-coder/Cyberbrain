@@ -1,7 +1,6 @@
 
 import { useState } from "react";
 import type { FC, ReactNode } from "react";
-import logo from "../../../shared/assets/cyberbrain.png";
 
 import type {
   KpiData,
@@ -9,12 +8,9 @@ import type {
   EngineScore,
   AgentDecision,
   TrustData,
-  SessionSummary,
+  WorkflowActivity,
 } from "../../../shared/types/idps";
-
-import { LiveAlarmFeed } from "./LiveAlarmFeed";
-
-import type { CorrectiveSuggestion } from "../../../shared/types/idps";
+import { AgentActivityFlow } from "./AgentActivityFlow";
 // ═══════════════════════════════════════════════════════════════════════════════
 // Helpers visuels
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -451,18 +447,16 @@ interface Props {
   alarms:      AlarmItem[];
   engines:     EngineScore[];
   decisions:   AgentDecision[];
-  sessions:    SessionSummary[];
   logLines:    string[];
   trust:       TrustData | null;
+  activities:  WorkflowActivity[];
   loading:     boolean;
   wsConnected: boolean;
   isLive:      boolean;
-  suggestions: CorrectiveSuggestion[];
 }
 
 export const DashboardPanel: FC<Props> = ({
-  kpis, alarms, engines, decisions, sessions, logLines, trust, loading, wsConnected, isLive,
-  suggestions,
+  kpis, alarms, engines, decisions, logLines, trust, activities, loading, wsConnected, isLive,
 }) => {
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 320, flexDirection: "column", gap: 16, color: "var(--muted,#6b7280)", fontSize: 13 }}>
@@ -476,12 +470,6 @@ export const DashboardPanel: FC<Props> = ({
   const healthColor = healthScore >= 90 ? "#0F6E56" : healthScore >= 70 ? "#854F0B" : "#A32D2D";
   const criticalCount = alarms.filter(a => a.severity === "CRITICAL").length;
   const alarmEngines  = engines.filter(e => e.status === "ALARM").length;
-const Header: FC = () => (
-  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-    <img src={logo} alt="Cyberbrain Logo" style={{ width: 40 }} />
-    <h1 style={{ margin: 0 }}>CYBERBRAIN</h1>
-  </div>
-);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes live-pulse{0%,100%{opacity:1}50%{opacity:.45}}`}</style>
@@ -492,7 +480,7 @@ const Header: FC = () => (
         <KpiCard
           label="Health score"
           value={`${healthScore.toFixed(1)}%`}
-          sub={kpis?.alert_status ?? "—"}
+          sub={kpis?.health_status ?? "—"}
           accent={healthColor}
         />
         <KpiCard
@@ -543,10 +531,22 @@ const Header: FC = () => (
   <FilteredAlarmFeed alarms={alarms} wsConnected={wsConnected}/>
   
  <Card 
-  title="Agents CrewAI — Workflow décisions"
-  style={{ maxHeight: 300, overflowY: "auto" }}
+  title="Agent Interaction Flow"
+  tag={`${activities.length} événements`}
+  style={{ maxHeight: 640, overflowY: "auto" }}
 >
-  <AgentWorkflow decisions={decisions}/>
+  <AgentActivityFlow
+    activities={activities}
+    decisions={decisions}
+    wsConnected={wsConnected}
+    isLive={isLive}
+  />
+  <div style={{ marginTop: 12, paddingTop: 12, borderTop: "0.5px solid var(--border,#e5e7eb)" }}>
+    <div style={{ fontSize: 10, color: "var(--muted,#6b7280)", marginBottom: 8 }}>
+      Structured decisions snapshot
+    </div>
+    <AgentWorkflow decisions={decisions.slice(0, 4)}/>
+  </div>
 </Card>
 </div>
 

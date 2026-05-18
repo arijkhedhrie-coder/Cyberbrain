@@ -36,6 +36,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from app.core.websocket_broadcast import broadcast_activity as _broadcast_activity
+except Exception:
+    def _broadcast_activity(data: dict) -> None:
+        return
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -106,6 +112,321 @@ def _resolve_output_dir(output_dir: str | os.PathLike[str] | None) -> Path:
     return candidate
 
 
+def _activity_id(record: dict[str, Any]) -> str:
+    suffix = (
+        str(record.get("source") or record.get("status") or record.get("threat_level") or "")
+        .replace(" ", "_")
+        .replace("/", "_")
+    )[:24]
+    return f"{record.get('session_id', 'session')}:{record.get('event_type', 'event')}:{record.get('timestamp', '')}:{suffix}"
+
+
+def _activity_severity_from_threat(threat: str | None) -> str:
+    threat_upper = str(threat or "NORMAL").upper()
+    if threat_upper == "CRITICAL":
+        return "CRITICAL"
+    if threat_upper in {"ELEVATED", "HIGH"}:
+        return "HIGH"
+    return "INFO"
+
+
+def _dashboard_activity(record: dict[str, Any]) -> dict[str, Any] | None:
+    event_type = str(record.get("event_type", ""))
+    timestamp = str(record.get("timestamp", ""))
+    session_id = str(record.get("session_id", ""))
+
+    def activity(
+        *,
+        stage: str,
+        actor: str,
+        title: str,
+        detail: str,
+        status: str,
+        severity: str = "INFO",
+        progress: int | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            "id": _activity_id(record),
+            "timestamp": timestamp,
+            "session_id": session_id,
+            "event_type": event_type,
+            "stage": stage,
+            "actor": actor,
+            "title": title,
+            "detail": detail,
+            "status": status,
+            "severity": severity,
+            "progress": progress,
+            "meta": meta or {},
+        }
+        return payload
+
+    if event_type == "SESSION_INIT":
+        return activity(
+            stage="session",
+            actor="System",
+            title="Pipeline session opened",
+            detail=str(record.get("note", "Session logger ready.")),
+            status="started",
+            progress=1,
+        )
+
+    if event_type == "PIPELINE_START":
+        row_count = int(record.get("row_count") or 0)
+        deduped = int(record.get("deduped_count") or row_count)
+        server_count = int(record.get("server_count") or 0)
+        return activity(
+            stage="ingestion",
+            actor="Collecteur",
+            title="Log ingestion completed",
+            detail=f"{row_count} raw lines, {deduped} deduplicated from {server_count} server(s).",
+            status="completed",
+            progress=12,
+            meta={
+                "data_sources": record.get("data_sources", []),
+                "data_quality": record.get("data_quality"),
+                "noise_ratio": record.get("noise_ratio"),
+                "ml_score_weight": record.get("ml_score_weight"),
+            },
+        )
+
+    if event_type == "METRICS_COMPUTED":
+        return activity(
+            stage="metrics",
+            actor="Analyste",
+            title="Security metrics computed",
+            detail=(
+                f"Health {record.get('health_score')}% | "
+                f"pattern {record.get('attack_pattern')} | "
+                f"entropy {record.get('ip_entropy')} bits."
+            ),
+            status="completed",
+            progress=28,
+            meta={
+                "alert_status": record.get("alert_status"),
+                "unique_attacking_ips": record.get("unique_attacking_ips"),
+                "attack_velocity": record.get("attack_velocity"),
+                "night_ratio": record.get("night_ratio"),
+            },
+        )
+
+    if event_type == "PASS1_COMPLETE":
+        return activity(
+            stage="pass1",
+            actor="Détecteur",
+            title="Pass 1 detection completed",
+            detail=f"{record.get('alarm_count', 0)} alarm(s) identified during primary analysis.",
+            status="completed",
+            severity="HIGH" if int(record.get("alarm_count", 0) or 0) > 0 else "INFO",
+            progress=42,
+            meta={
+                "alarms_by_domain": record.get("alarms_by_domain", {}),
+                "alarms_by_severity": record.get("alarms_by_severity", {}),
+                "top5_messages": record.get("top5_messages", []),
+            },
+        )
+
+    if event_type == "TRUST_COMPUTED":
+        return activity(
+            stage="trust",
+            actor="Trust Gate",
+            title="Trust score computed",
+            detail=(
+                f"Confidence {record.get('confidence_in_metrics')} "
+                f"({record.get('confidence_label')}) with stability {record.get('stability')}."
+            ),
+            status="completed",
+            severity="HIGH" if (record.get("drift_flagged") or False) else "INFO",
+            progress=50,
+            meta={
+                "model_agreement": record.get("model_agreement"),
+                "false_positive_rate": record.get("false_positive_rate"),
+                "drift_score": record.get("drift_score"),
+                "drift_label": record.get("drift_label"),
+            },
+        )
+
+    if event_type == "DYNAMIC_CONFIG_ISSUED":
+        threat_level = str(record.get("threat_level", "NORMAL"))
+        return activity(
+            stage="orchestrator",
+            actor="Orchestrateur",
+            title="Pass 2 escalation issued",
+            detail=str(record.get("reasoning_excerpt") or "Dynamic configuration was issued after Pass 1."),
+            status="completed",
+            severity=_activity_severity_from_threat(threat_level),
+            progress=60,
+            meta={
+                "threat_level": threat_level,
+                "confidence": record.get("confidence"),
+                "rerun_engines": record.get("rerun_engines", []),
+                "escalate_ips": record.get("escalate_ips", []),
+                "suppress_ips": record.get("suppress_ips", []),
+            },
+        )
+
+    if event_type == "DYNAMIC_CONFIG_DEFAULT":
+        return activity(
+            stage="orchestrator",
+            actor="Orchestrateur",
+            title="Pass 2 skipped",
+            detail=str(record.get("note") or "No threshold override was required."),
+            status="completed",
+            progress=60,
+        )
+
+    if event_type == "PASS2_COMPLETE":
+        delta = int(record.get("alarm_delta") or 0)
+        delta_text = f"+{delta}" if delta >= 0 else str(delta)
+        return activity(
+            stage="pass2",
+            actor="Détecteur",
+            title="Pass 2 analysis completed",
+            detail=f"{record.get('alarm_count', 0)} final alarm(s), delta {delta_text} vs Pass 1.",
+            status="completed",
+            severity="HIGH" if int(record.get("new_alarm_count", 0) or 0) > 0 else "INFO",
+            progress=68,
+            meta={
+                "engines_rerun": record.get("engines_rerun", []),
+                "new_alarm_count": record.get("new_alarm_count"),
+                "new_alarm_messages": record.get("new_alarm_messages", []),
+            },
+        )
+
+    if event_type == "ANALYSIS_CREW_STARTED":
+        return activity(
+            stage="analysis",
+            actor="CrewAI",
+            title="Analysis crew started",
+            detail="Collector, Analyst, and Detector are reasoning over the latest pipeline state.",
+            status="running",
+            progress=74,
+            meta={
+                "agents": record.get("agents", []),
+                "nb_anomalies": record.get("nb_anomalies"),
+                "ip_principale": record.get("ip_principale"),
+            },
+        )
+
+    if event_type == "ANALYSIS_CREW_COMPLETED":
+        return activity(
+            stage="analysis",
+            actor="CrewAI",
+            title="Analysis crew completed",
+            detail=str(record.get("result_excerpt") or "Crew analysis finished."),
+            status="completed",
+            progress=78,
+            meta={"agents": record.get("agents", [])},
+        )
+
+    if event_type == "REPORT_CREW_STARTED":
+        return activity(
+            stage="reporting",
+            actor="Rapporteur",
+            title="Report generation started",
+            detail="Reporter agent is preparing the narrative output for this run.",
+            status="running",
+            progress=82,
+            meta={"agents": record.get("agents", [])},
+        )
+
+    if event_type == "REPORT_CREW_COMPLETED":
+        return activity(
+            stage="reporting",
+            actor="Rapporteur",
+            title="Report generation completed",
+            detail=str(record.get("result_excerpt") or "Reporter output produced."),
+            status="completed",
+            progress=86,
+        )
+
+    if event_type == "CORRECTIVE_TOOL_STARTED":
+        return activity(
+            stage="corrective",
+            actor="Corrective Agent",
+            title="Corrective reasoning started",
+            detail="Corrective agent is evaluating remediation or escalation actions.",
+            status="running",
+            progress=90,
+            meta={
+                "nb_anomalies": record.get("nb_anomalies"),
+                "ip_principale": record.get("ip_principale"),
+            },
+        )
+
+    if event_type == "CORRECTIVE_TOOL_COMPLETED":
+        status = str(record.get("status") or "completed").lower()
+        severity = "HIGH" if status in {"pending", "blocked"} else "INFO"
+        return activity(
+            stage="corrective",
+            actor="Corrective Agent",
+            title=str(record.get("title") or "Corrective decision produced"),
+            detail=str(record.get("result_excerpt") or "Corrective agent finished."),
+            status=status,
+            severity=severity,
+            progress=94,
+            meta={
+                "mode": record.get("mode"),
+                "action_type": record.get("action_type"),
+                "confidence": record.get("confidence"),
+            },
+        )
+
+    if event_type == "AGENTS_COMPLETE":
+        return activity(
+            stage="reporting",
+            actor="Rapporteur",
+            title="Agent coordination finished",
+            detail=str(record.get("result_excerpt") or "All agent outputs were consolidated."),
+            status="completed",
+            progress=97,
+        )
+
+    if event_type == "SESSION_SUMMARY":
+        return activity(
+            stage="session",
+            actor="Pipeline",
+            title="Pipeline run completed",
+            detail=(
+                f"{record.get('alarm_count', 0)} final alarm(s) | "
+                f"Pass 2 {'ran' if record.get('pass2_ran') else 'skipped'} | "
+                f"elapsed {record.get('elapsed_seconds')}s."
+            ),
+            status="completed",
+            severity=_activity_severity_from_threat(str(record.get("agent_threat_level", "NORMAL"))),
+            progress=100,
+            meta={
+                "agent_threat_level": record.get("agent_threat_level"),
+                "health_score": record.get("health_score"),
+                "attack_pattern": record.get("attack_pattern"),
+                "agent_config_summary": record.get("agent_config_summary"),
+            },
+        )
+
+    if event_type == "WARNING":
+        return activity(
+            stage="session",
+            actor=str(record.get("source") or "System"),
+            title=f"Warning from {record.get('source', 'system')}",
+            detail=str(record.get("message") or ""),
+            status="warning",
+            severity="HIGH",
+        )
+
+    if event_type == "ERROR":
+        return activity(
+            stage="session",
+            actor=str(record.get("source") or "System"),
+            title=f"Error in {record.get('source', 'system')}",
+            detail=str(record.get("error") or ""),
+            status="error",
+            severity="CRITICAL",
+        )
+
+    return None
+
+
 # ── SessionLogger ──────────────────────────────────────────────────────────────
 
 class SessionLogger:
@@ -133,6 +454,12 @@ class SessionLogger:
     EV_DYNAMIC_CONFIG_ISSUED = "DYNAMIC_CONFIG_ISSUED"
     EV_DYNAMIC_CONFIG_DEFAULT= "DYNAMIC_CONFIG_DEFAULT"
     EV_PASS2_COMPLETE        = "PASS2_COMPLETE"
+    EV_ANALYSIS_CREW_STARTED = "ANALYSIS_CREW_STARTED"
+    EV_ANALYSIS_CREW_COMPLETED = "ANALYSIS_CREW_COMPLETED"
+    EV_REPORT_CREW_STARTED   = "REPORT_CREW_STARTED"
+    EV_REPORT_CREW_COMPLETED = "REPORT_CREW_COMPLETED"
+    EV_CORRECTIVE_TOOL_STARTED = "CORRECTIVE_TOOL_STARTED"
+    EV_CORRECTIVE_TOOL_COMPLETED = "CORRECTIVE_TOOL_COMPLETED"
     EV_AGENTS_COMPLETE       = "AGENTS_COMPLETE"
     EV_SESSION_SUMMARY       = "SESSION_SUMMARY"
     EV_TRUST_COMPUTED        = "TRUST_COMPUTED"      # Phase B — performance engine
@@ -165,9 +492,17 @@ class SessionLogger:
             "event_type": event_type,
             **{k: _safe(v) for k, v in payload.items()},
         }
+        dashboard_activity = _dashboard_activity(record)
+        if dashboard_activity:
+            record["dashboard_activity"] = dashboard_activity
         line = json.dumps(record, ensure_ascii=False)
         self._file.write(line + "\n")
         self._file.flush()
+        if dashboard_activity:
+            try:
+                _broadcast_activity(dashboard_activity)
+            except Exception:
+                pass
 
         # Human-readable stdout echo
         alarm_count = payload.get("alarm_count", "")

@@ -1,8 +1,8 @@
 {
-  "adaptation_frequency": 41,
-  "adaptation_aggressivity": 0.5,
+  "adaptation_frequency": 50,
+  "adaptation_aggressivity": 0.2,
   "ml_weight": 0.7,
   "agent_mode_auto_upgrade": false,
-  "last_updated": "2026-05-12T22:35:48.479492",
+  "last_updated": "2026-05-18T19:48:58.787785",
   "_version": 1
 }

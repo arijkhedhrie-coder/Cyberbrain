@@ -11,8 +11,9 @@ import type {
   HealthCheck,
   WsIncomingMessage,
   CorrectiveSuggestion,
+  WorkflowActivity,
 } from "../../shared/types/idps";
-import { isHistoryMsg } from "../../shared/types/idps";
+import { isActivityHistoryMsg, isActivityMsg, isHistoryMsg } from "../../shared/types/idps";
 
 const API     = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_URL  = import.meta.env.VITE_WS_URL  || "ws://localhost:8000/ws/logs";
@@ -94,6 +95,191 @@ const sortByTs = (arr: AlarmItem[]): AlarmItem[] =>
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 
+const normalizeActivity = (activity: any): WorkflowActivity => ({
+  id:
+    activity?.id ??
+    `${activity?.event_type ?? activity?.stage ?? "activity"}-${activity?.timestamp ?? Date.now()}`,
+  timestamp: activity?.timestamp ?? new Date().toISOString(),
+  session_id: activity?.session_id,
+  event_type: activity?.event_type,
+  stage: activity?.stage ?? "session",
+  actor: activity?.actor ?? "System",
+  title: activity?.title ?? activity?.event_type ?? "Activity",
+  detail: activity?.detail ?? "",
+  status: activity?.status ?? "info",
+  severity: activity?.severity ?? "INFO",
+  progress:
+    typeof activity?.progress === "number"
+      ? activity.progress
+      : null,
+  meta:
+    activity?.meta && typeof activity.meta === "object"
+      ? activity.meta as Record<string, unknown>
+      : {},
+});
+
+const uniqueActivities = (arr: WorkflowActivity[]): WorkflowActivity[] => {
+  const map = new Map<string, WorkflowActivity>();
+  for (const item of arr) {
+    map.set(item.id, item);
+  }
+  return Array.from(map.values());
+};
+
+const sortActivities = (arr: WorkflowActivity[]): WorkflowActivity[] =>
+  arr.slice().sort((a, b) =>
+    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+const mapLegacyEventToActivity = (event: Record<string, any>): WorkflowActivity | null => {
+  const timestamp = String(event.timestamp ?? new Date().toISOString());
+  const base = {
+    id: `${event.session_id ?? "session"}:${event.event_type ?? "event"}:${timestamp}`,
+    timestamp,
+    session_id: event.session_id,
+    event_type: event.event_type,
+    meta: {},
+  };
+
+  switch (event.event_type) {
+    case "PIPELINE_START":
+      return normalizeActivity({
+        ...base,
+        stage: "ingestion",
+        actor: "Collecteur",
+        title: "Log ingestion completed",
+        detail: `${event.row_count ?? 0} raw lines from ${event.server_count ?? 0} server(s).`,
+        status: "completed",
+        severity: "INFO",
+        progress: 12,
+      });
+    case "METRICS_COMPUTED":
+      return normalizeActivity({
+        ...base,
+        stage: "metrics",
+        actor: "Analyste",
+        title: "Security metrics computed",
+        detail: `Health ${event.health_score ?? "?"}% | pattern ${event.attack_pattern ?? "UNKNOWN"}.`,
+        status: "completed",
+        severity: "INFO",
+        progress: 28,
+      });
+    case "PASS1_COMPLETE":
+      return normalizeActivity({
+        ...base,
+        stage: "pass1",
+        actor: "Détecteur",
+        title: "Pass 1 detection completed",
+        detail: `${event.alarm_count ?? 0} alarm(s) detected.`,
+        status: "completed",
+        severity: (event.alarm_count ?? 0) > 0 ? "HIGH" : "INFO",
+        progress: 42,
+      });
+    case "TRUST_COMPUTED":
+      return normalizeActivity({
+        ...base,
+        stage: "trust",
+        actor: "Trust Gate",
+        title: "Trust score computed",
+        detail: `Confidence ${event.confidence_in_metrics ?? "?"} (${event.confidence_label ?? "UNKNOWN"}).`,
+        status: "completed",
+        severity: event.drift_flagged ? "HIGH" : "INFO",
+        progress: 50,
+      });
+    case "DYNAMIC_CONFIG_ISSUED":
+      return normalizeActivity({
+        ...base,
+        stage: "orchestrator",
+        actor: "Orchestrateur",
+        title: "Pass 2 escalation issued",
+        detail: event.reasoning_excerpt ?? "Dynamic configuration issued.",
+        status: "completed",
+        severity: event.threat_level === "CRITICAL" ? "CRITICAL" : event.threat_level === "ELEVATED" ? "HIGH" : "INFO",
+        progress: 60,
+      });
+    case "DYNAMIC_CONFIG_DEFAULT":
+      return normalizeActivity({
+        ...base,
+        stage: "orchestrator",
+        actor: "Orchestrateur",
+        title: "Pass 2 skipped",
+        detail: event.note ?? "No threshold override was required.",
+        status: "completed",
+        severity: "INFO",
+        progress: 60,
+      });
+    case "PASS2_COMPLETE":
+      return normalizeActivity({
+        ...base,
+        stage: "pass2",
+        actor: "Détecteur",
+        title: "Pass 2 analysis completed",
+        detail: `${event.alarm_count ?? 0} final alarm(s), delta ${event.alarm_delta ?? 0}.`,
+        status: "completed",
+        severity: "INFO",
+        progress: 68,
+      });
+    case "AGENTS_COMPLETE":
+      return normalizeActivity({
+        ...base,
+        stage: "reporting",
+        actor: "Rapporteur",
+        title: "Agent coordination finished",
+        detail: String(event.result_excerpt ?? ""),
+        status: "completed",
+        severity: "INFO",
+        progress: 97,
+      });
+    case "SESSION_SUMMARY":
+      return normalizeActivity({
+        ...base,
+        stage: "session",
+        actor: "Pipeline",
+        title: "Pipeline run completed",
+        detail: `${event.alarm_count ?? 0} final alarm(s) | elapsed ${event.elapsed_seconds ?? "?"}s.`,
+        status: "completed",
+        severity: event.agent_threat_level === "CRITICAL" ? "CRITICAL" : event.agent_threat_level === "ELEVATED" ? "HIGH" : "INFO",
+        progress: 100,
+      });
+    case "WARNING":
+      return normalizeActivity({
+        ...base,
+        stage: "session",
+        actor: event.source ?? "System",
+        title: `Warning from ${event.source ?? "system"}`,
+        detail: String(event.message ?? ""),
+        status: "warning",
+        severity: "HIGH",
+      });
+    case "ERROR":
+      return normalizeActivity({
+        ...base,
+        stage: "session",
+        actor: event.source ?? "System",
+        title: `Error in ${event.source ?? "system"}`,
+        detail: String(event.error ?? ""),
+        status: "error",
+        severity: "CRITICAL",
+      });
+    default:
+      return null;
+  }
+};
+
+const extractActivitiesFromEvents = (events: Record<string, unknown>[]): WorkflowActivity[] => {
+  const raw = events
+    .map((event) => {
+      const record = event as Record<string, any>;
+      if (record.dashboard_activity) {
+        return normalizeActivity(record.dashboard_activity);
+      }
+      return mapLegacyEventToActivity(record);
+    })
+    .filter((activity): activity is WorkflowActivity => activity !== null);
+
+  return sortActivities(uniqueActivities(raw));
+};
+
 // ─── Helper fetch authentifié ─────────────────────────────────────────────────
 async function get<T>(path: string, servers: string[] = []): Promise<T> {
   const params = servers.length > 0
@@ -118,6 +304,7 @@ export interface IdpsDashboardState {
   sessions:     SessionSummary[];
   logLines:     string[];
   trust:        TrustData | null;
+  activities:   WorkflowActivity[];
   sessionCount: number;
   logsAnalysed: number;
   threatLevel:  string;
@@ -137,6 +324,7 @@ const EMPTY: IdpsDashboardState = {
   sessions:     [],
   logLines:     [],
   trust:        null,
+  activities:   [],
   sessionCount: 0,
   logsAnalysed: 0,
   threatLevel:  "NORMAL",
@@ -210,13 +398,16 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
         suggestions: suggestionsVal.length, sessions: sessVal.length,
       });
       const logLines = pipeVal?.log_lines ?? [];
+      const historicalActivities = pipeVal?.events
+        ? extractActivitiesFromEvents(pipeVal.events)
+        : [];
       const latestSess = sessVal[0];
 
       const events = pipeVal?.events ?? [];
 
       const metricsEvent = events.find((e: any) => e.event_type === "METRICS_COMPUTED");
       const pipelineStart = events.find((e: any) => e.event_type === "PIPELINE_START");
-      const trustEvent = events.find((e: any) => e.event_type === "TRUST_COMPUTED");
+      // const trustEvent = events.find((e: any) => e.event_type === "TRUST_COMPUTED");
 
       setState(prev => {
         // ✅ Correct merge order: prev state -> REST -> live (prev gets overwritten by fresher REST)
@@ -276,7 +467,8 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
 
         const normalizedTrust: TrustData | null = trustVal
           ? {
-              available: true,
+              available:
+                ((trustVal as any).available ?? true) as boolean,
               model_agreement:
                 (trustVal.model_agreement ??
                   (trustVal as any).agreement ??
@@ -315,6 +507,7 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
           lastUpdate:   new Date(),
           kpis:         normalizedKpis,
           trust:        normalizedTrust,
+          activities:   sortActivities(uniqueActivities([...prev.activities, ...historicalActivities])).slice(0, 150),
           engines:      engVal,
           decisions:    decVal,
           sessions:     sessVal,
@@ -375,6 +568,21 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
             return;
           }
 
+          if (isActivityHistoryMsg(data)) {
+            const history = Array.isArray(data.activities)
+              ? data.activities.map(normalizeActivity)
+              : [];
+            if (history.length > 0) {
+              setState(prev => ({
+                ...prev,
+                activities: sortActivities(
+                  uniqueActivities([...history, ...prev.activities])
+                ).slice(0, 150),
+              }));
+            }
+            return;
+          }
+
           if (isHistoryMsg(data)) {
             const histAlarms = Array.isArray(data.alarms) ? data.alarms : []; // ✅ safe guard
             if (histAlarms.length > 0) {
@@ -385,6 +593,19 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
                 ).slice(0, 100),
               }));
             }
+            return;
+          }
+
+          if (isActivityMsg(data)) {
+            const activity = normalizeActivity(data.activity);
+            setState(prev => ({
+              ...prev,
+              lastUpdate: new Date(),
+              isLive: true,
+              activities: sortActivities(
+                uniqueActivities([activity, ...prev.activities])
+              ).slice(0, 150),
+            }));
             return;
           }
 
