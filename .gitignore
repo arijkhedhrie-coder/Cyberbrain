@@ -8,6 +8,7 @@ frontend/output/
 backend/.crewai/
 backend/long_term_memory.json
 backend/app/long_term_memory.json
+backend/app/memory_dataset_*.json
 backend/python
 .env
 __pycache__/
@@ -16,6 +17,7 @@ __pycache__/
 *.pyd
 # Logs
 backend/data/logs/
+backend/data/corrective_suggestions.json
 # Raw data
 backend/data/raw/
 # Models

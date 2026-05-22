@@ -704,7 +704,17 @@ import threading
 
 @app.route("/api/pipeline/restart", methods=["POST"])
 def restart_pipeline():
-    """Lance le pipeline dans un thread séparé pour ne pas bloquer l'API."""
+    """Relance le pipeline via la file de tâches si disponible."""
+    try:
+        from app.services.background_tasks import enqueue_pipeline_run
+
+        job = enqueue_pipeline_run(trigger="manual", requested_by="dashboard_service")
+        if job is not None:
+            print(f"[PIPELINE RESTART] Task queue accepted id={job.task_id}")
+            return jsonify({"status": "started", "message": "Pipeline relancé"}), 202
+    except Exception as e:
+        print(f"[PIPELINE RESTART] Queue fallback: {e}")
+
     def _run():
         try:
             from app.main import main  

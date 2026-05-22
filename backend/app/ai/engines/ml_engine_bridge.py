@@ -500,6 +500,8 @@ def layer0_pre_scan(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 def detecter_anomalies(
     df_raw: pd.DataFrame,
     dynamic_config: DynamicConfig | None = None,
+    normalized_df: pd.DataFrame | None = None,
+    prediction_cache: dict[str, Any] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, list, list[dict]]:
     """
     Full hybrid detection pipeline.
@@ -508,6 +510,9 @@ def detecter_anomalies(
         df_raw:         Raw log DataFrame (from ingestion / transformation)
         dynamic_config: Optional agent-issued config. If None or default,
                         only Pass 1 runs (identical to v3 behavior).
+        normalized_df:  Optional pre-normalized DataFrame to avoid duplicate
+                        normalization across passes.
+        prediction_cache: Optional cached prediction-engine result.
 
     Returns:
         (df_annotated, df_anomalies, alarmes, threshold_snapshots)
@@ -521,7 +526,19 @@ def detecter_anomalies(
     cfg = dynamic_config or DynamicConfig.default()
     print(f"\n[BRIDGE v4] Hybrid IDPS — Pass 1 (default thresholds)")
 
-    df_norm = normalize(df_raw, verbose=True)
+    df_norm = normalized_df.copy() if normalized_df is not None else normalize(df_raw, verbose=False)
+
+    # ml_engine_bridge.py — in detecter_anomalies(), after normalize():
+
+# Build IP → server_id map from original df
+    ip_to_server: dict[str, str] = {}
+    if "server_id" in df_raw.columns and "IP_Source" in df_raw.columns:
+        for _, row in df_raw[["IP_Source", "server_id"]].dropna().iterrows():
+            ip_str = str(row["IP_Source"]).strip()
+            if ip_str and ip_str.lower() not in ("nan", "none", ""):
+                # An IP may appear in multiple datasets; keep the one with most rows
+                # (simple approach: last-write-wins, or you could count)
+                ip_to_server[ip_str] = str(row["server_id"])
 
     # 🧠 Layer 0 pre-scan (ultra-light flood detection)
     df_norm, layer0_signals = layer0_pre_scan(df_norm)
@@ -529,11 +546,14 @@ def detecter_anomalies(
     # ── PASS 1: default thresholds ────────────────────────────────────────
     p1 = _run_engines(df_norm, DynamicConfig.default(), layer0_signals=layer0_signals)
 
-    try:
-        prediction = run_prediction_engine(df_norm)
-    except Exception as e:
-        print(f"[BRIDGE] [PREDICTION] Failed: {type(e).__name__}: {e}")
-        prediction = {"prediction_score": 0, "flags": [], "predicted_events": [], "signals": {}}
+    if prediction_cache is not None:
+        prediction = prediction_cache
+    else:
+        try:
+            prediction = run_prediction_engine(df_norm)
+        except Exception as e:
+            print(f"[BRIDGE] [PREDICTION] Failed: {type(e).__name__}: {e}")
+            prediction = {"prediction_score": 0, "flags": [], "predicted_events": [], "signals": {}}
 
     p1_snapshot = _build_threshold_snapshot(DynamicConfig.default(), pass_number=1)
     corr_map_p1 = build_correlation_map(
@@ -541,7 +561,14 @@ def detecter_anomalies(
         p1['sess_result'], p1['kernel_meta'], df_norm,
         window_min=CORR_TIME_WINDOW_MIN,
     )
-    alarmes_p1 = _collect_all_alarms(p1, corr_map_p1, prediction, threshold_snapshot=p1_snapshot, layer0_signals=layer0_signals)
+    alarmes_p1 = _collect_all_alarms(
+        p1,
+        corr_map_p1,
+        prediction,
+        threshold_snapshot=p1_snapshot,
+        layer0_signals=layer0_signals,
+        ip_to_server=ip_to_server,
+    )
     threshold_snapshots = [p1_snapshot]
 
     # ── PASS 2: shadow mode — results NEVER applied automatically ────────────
@@ -563,7 +590,14 @@ def detecter_anomalies(
             p2['sess_result'], p2['kernel_meta'], df_norm,
             window_min=window,
         )
-        alarmes_shadow = _collect_all_alarms(p2, corr_map_p2, prediction, threshold_snapshot=p2_snapshot, layer0_signals=layer0_signals)
+        alarmes_shadow = _collect_all_alarms(
+            p2,
+            corr_map_p2,
+            prediction,
+            threshold_snapshot=p2_snapshot,
+            layer0_signals=layer0_signals,
+            ip_to_server=ip_to_server,
+        )
         threshold_snapshots.append(p2_snapshot)
 
         # ── Step 2: Compute pass metrics, read trust score, run gate ─────────
@@ -876,7 +910,8 @@ def _collect_all_alarms(
     corr_map: dict,
     prediction: dict,
     threshold_snapshot: dict | None = None,
-    layer0_signals: dict | None = None,          # NEW
+    layer0_signals: dict | None = None,    
+    ip_to_server: dict | None = None,      # NEW
 ) -> list[dict]:
     """
     Builds the full alarm list from a single set of engine outputs.
@@ -932,6 +967,14 @@ def _collect_all_alarms(
         a.setdefault("model_agreement", 1.0)
         a.setdefault("agreement_label", "HIGH")
         a.setdefault("fp_score_session", 0.0)
+    
+    if ip_to_server:
+        for a in alarmes:
+            ip = str(a.get("ip") or "")
+            if not a.get("server_id") and ip in ip_to_server:
+                a["server_id"] = ip_to_server[ip]
+    
+   
 
     return alarmes
 

@@ -1,22 +1,47 @@
-# dashboard_routes.py
-# ─────────────────────────────────────────────────────────────
 from __future__ import annotations
-
-from typing import List
-from fastapi import APIRouter, Query
 
 import glob
 import json
 import threading
 import time
-from collections import deque
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from typing import Any, List
 
-# ── Cache ─────────────────────────────────────────────────────
-_cache: dict = {}
+from fastapi import APIRouter, HTTPException, Query
+
+from app.ai.agents.memory import get_memory_file
+from app.core.fusion_view import FUSION_DATASET, FUSION_LABEL, is_fusion_dataset, normalize_dataset_query
+from app.core.pipeline_store import AVAILABLE_DATASETS, LEGACY_MERGED_DATASET, PIPELINE_RESULTS
+
+router = APIRouter(prefix="/api", tags=["dashboard"])
+
+_cache: dict[str, dict[str, Any]] = {}
 _cache_lock = threading.Lock()
-_CACHE_TTL = 30  # secondes
+_CACHE_TTL = 30
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+MEMORY_FILE = PROJECT_ROOT / "app" / "long_term_memory.json"
+OUTPUT_DIR = PROJECT_ROOT / "app" / "output"
+_EXCLUDED_OUTPUT_DATASET_DIRS = {"event_store"}
+
+_LABEL_TO_ENGINES: dict[str, list[str]] = {
+    "auth": ["SSH"],
+    "web": ["WEB"],
+    "ftp": ["FTP"],
+    "kernel": ["KERNEL", "SESSION"],
+}
+_ENGINE_TO_LABEL: dict[str, str] = {
+    "SSH": "auth",
+    "WEB": "web",
+    "FTP": "ftp",
+    "KERNEL": "kernel",
+    "SESSION": "kernel",
+    "PREDICTION": "kernel",
+    "CORRELATION": "auth",
+}
+
 
 def _cached(key: str, loader, ttl: int = _CACHE_TTL):
     now = time.time()
@@ -29,305 +54,421 @@ def _cached(key: str, loader, ttl: int = _CACHE_TTL):
         _cache[key] = {"data": data, "ts": now}
     return data
 
-# ── Chemins ───────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parents[3]   
-MEMORY_FILE  = PROJECT_ROOT / "app" / "long_term_memory.json"
-OUTPUT_DIR   = PROJECT_ROOT / "app" / "output"
 
-# ── Fonctions utilitaires ─────────────────────────────────────
 def _as_float_or_none(v):
     try:
         return float(v) if v is not None else None
     except (TypeError, ValueError):
         return None
 
-def _load_memory() -> dict:
-    if not MEMORY_FILE.exists():
+
+def _dataset_key(dataset: str | None) -> str:
+    normalized = normalize_dataset_query(dataset)
+    if normalized is None:
+        return ""
+    if normalized == FUSION_DATASET:
+        return LEGACY_MERGED_DATASET
+    return normalized
+
+
+def _available_dataset_ids() -> list[str]:
+    names = {str(d) for d in AVAILABLE_DATASETS if d}
+    names.update(
+        str(k) for k in PIPELINE_RESULTS.keys()
+        if k and k != LEGACY_MERGED_DATASET
+    )
+    for path in PROJECT_ROOT.glob("app/memory_*.json"):
+        names.add(path.stem.replace("memory_", "", 1))
+    for path in OUTPUT_DIR.iterdir() if OUTPUT_DIR.exists() else []:
+        if path.is_dir() and path.name not in _EXCLUDED_OUTPUT_DATASET_DIRS:
+            names.add(path.name)
+    return sorted(names)
+
+
+def _should_expose_fusion_dataset(datasets: list[str]) -> bool:
+    # Fusion replay can aggregate across the event store even when there is no
+    # legacy merged payload in PIPELINE_RESULTS, so expose the selector option
+    # whenever we have at least one real dataset to overlay.
+    return bool(datasets) or LEGACY_MERGED_DATASET in PIPELINE_RESULTS
+
+
+def _default_dataset_id() -> str | None:
+    datasets = _available_dataset_ids()
+    return datasets[0] if datasets else None
+
+
+def _resolve_selected_dataset(dataset: str | None) -> str | None:
+    if dataset:
+        return dataset
+    return _default_dataset_id()
+
+
+def _get_dataset_payload(dataset: str | None) -> dict[str, Any] | None:
+    key = _dataset_key(dataset)
+    if key and key in PIPELINE_RESULTS:
+        return PIPELINE_RESULTS[key]
+    if not dataset:
+        default_dataset = _default_dataset_id()
+        if default_dataset and default_dataset in PIPELINE_RESULTS:
+            return PIPELINE_RESULTS[default_dataset]
+    return None
+
+
+def _load_memory(dataset: str | None = None) -> dict[str, Any]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("memory"), dict):
+        return payload["memory"]
+
+    if is_fusion_dataset(dataset):
+        return {}
+
+    memory_path = get_memory_file(dataset) if dataset else MEMORY_FILE
+    if not Path(memory_path).exists():
         return {}
     try:
-        with open(MEMORY_FILE, "r", encoding="utf-8", errors="replace") as f:
+        with open(memory_path, "r", encoding="utf-8", errors="replace") as f:
             return json.load(f)
     except Exception:
         return {}
 
-def _latest_jsonl() -> list:
-    files = sorted(glob.glob(str(OUTPUT_DIR / "session_*.jsonl")))
+
+def _latest_jsonl(dataset: str | None = None) -> list[dict[str, Any]]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("events"), list):
+        return [e for e in payload["events"] if isinstance(e, dict)]
+
+    if dataset:
+        dataset_dir = OUTPUT_DIR / dataset
+        files = sorted(glob.glob(str(dataset_dir / "session_*.jsonl")))
+    else:
+        files = sorted(glob.glob(str(OUTPUT_DIR / "session_*.jsonl")))
     if not files:
         return []
-    events = []
+
+    events: list[dict[str, Any]] = []
     try:
         with open(files[-1], "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
-                if line:
-                    try:
-                        events.append(json.loads(line))
-                    except Exception:
-                        pass
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(payload, dict):
+                    events.append(payload)
     except Exception:
-        pass
+        return []
     return events
 
-def _get_event(events: list, event_type: str) -> dict:
-    for e in events:
-        if isinstance(e, dict) and e.get("event_type") == event_type:
-            return e
+
+def _get_event(events: list[dict[str, Any]], event_type: str) -> dict[str, Any]:
+    for event in events:
+        if isinstance(event, dict) and event.get("event_type") == event_type:
+            return event
     return {}
 
-def _build_kpis(events: list, memory: dict) -> dict:
-    """Construit les KPIs depuis les events JSONL et la mémoire."""
+
+def _build_kpis(events: list[dict[str, Any]], memory: dict[str, Any], dataset: str | None = None) -> dict[str, Any]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("kpis"), dict):
+        base = dict(payload["kpis"])
+        base.setdefault("available", True)
+        base.setdefault("missing_data", [])
+        base.setdefault("server_count", len(payload.get("server_ids", [])))
+        base.setdefault("data_sources", payload.get("data_sources", []))
+        return base
+
     sessions = memory.get("sessions", [])
     last = sessions[-1].get("donnees", {}) if sessions else {}
+    metrics = _get_event(events, "METRICS_COMPUTED")
+    trust_ev = _get_event(events, "TRUST_COMPUTED")
+    pass1 = _get_event(events, "PASS1_COMPLETE")
 
-    metrics   = _get_event(events, "METRICS_COMPUTED")
-    pass1     = _get_event(events, "PASS1_COMPLETE")
-    trust_ev  = _get_event(events, "TRUST_COMPUTED")
-
-    health_score = _as_float_or_none(
-        metrics.get("health_score") or last.get("health_score")
-    ) or 100.0
-
-    nb_alarms    = int(pass1.get("alarms", 0) or last.get("nb_alarmes_final", 0))
-    alert_status = metrics.get("alert_status") or last.get("agent_threat_level", "NORMAL")
-
+    health_score = _as_float_or_none(metrics.get("health_score") or last.get("health_score")) or 100.0
+    row_count = int(metrics.get("row_count", 0) or last.get("row_count", 0) or last.get("lines_analyzed", 0))
+    deduped_count = int(
+        metrics.get("deduped_count", 0)
+        or metrics.get("dedup_count", 0)
+        or last.get("deduped_count", 0)
+        or last.get("dedup_count", 0)
+        or row_count
+    )
     return {
-        "health_score":          health_score,
-        "health_status":         "HEALTHY" if health_score >= 90 else ("WARNING" if health_score >= 70 else "CRITICAL"),
-        "alert_status":          alert_status,
-        "nb_alarms":             nb_alarms,
-        "ssh_failures":          int(last.get("ssh_failures", 0)),
-        "blocked_ips":           int(last.get("blocked_ips", 0)),
-        "unique_attacking_ips":  int(metrics.get("unique_ips", 0) or last.get("unique_attacking_ips", 0)),
-        "attack_velocity":       float(metrics.get("velocity", 0.0) or 0.0),
-        "is_velocity_spike":     bool(metrics.get("velocity_spike", False)),
-        "attack_pattern":        metrics.get("attack_pattern") or last.get("attack_pattern", ""),
-        "entropy":               _as_float_or_none(metrics.get("entropy")),
-        "trust_score":           _as_float_or_none(
-            trust_ev.get("confidence_in_metrics") or trust_ev.get("confidence")
-        ),
-        "trust_label":           trust_ev.get("confidence_label") or trust_ev.get("label", ""),
-        "row_count":      int(metrics.get("row_count", 0) or last.get("lines_analyzed", 0)),
-        "deduped_count":  int(metrics.get("dedup_count", 0) or last.get("dedup_count", 0)),
-        "lines_analyzed": int(metrics.get("row_count", 0) or last.get("lines_analyzed", 0)),
-        "dedup_count":    int(metrics.get("dedup_count", 0) or last.get("dedup_count", 0)),
+        "available": True,
+        "missing_data": [],
+        "health_score": health_score,
+        "health_status": "HEALTHY" if health_score >= 90 else ("WARNING" if health_score >= 70 else "CRITICAL"),
+        "ssh_failures": int(last.get("ssh_failures", 0)),
+        "blocked_ips": int(last.get("blocked_ips", 0)),
+        "alert_status": metrics.get("alert_status") or last.get("alert_status") or "NORMAL",
+        "attack_pattern": metrics.get("attack_pattern") or last.get("attack_pattern") or "",
+        "ip_entropy": _as_float_or_none(metrics.get("ip_entropy") or last.get("ip_entropy")),
+        "unique_attacking_ips": int(metrics.get("unique_attacking_ips", 0) or last.get("unique_attacking_ips", 0)),
+        "attack_velocity": _as_float_or_none(metrics.get("attack_velocity") or last.get("attack_velocity")) or 0.0,
+        "is_velocity_spike": bool(metrics.get("is_velocity_spike", False)),
+        "night_ratio": _as_float_or_none(metrics.get("night_ratio") or last.get("night_ratio")),
+        "row_count": row_count,
+        "server_count": len(last.get("server_ids", []) or last.get("serveurs_actifs", []) or []),
+        "data_sources": list(last.get("data_sources", [])),
+        "deduped_count": deduped_count,
+        "noise_ratio": _as_float_or_none(metrics.get("noise_ratio") or last.get("noise_ratio")),
+        "data_quality": metrics.get("data_quality") or last.get("data_quality"),
+        "notes": {},
+        "nb_alarms": int(pass1.get("alarm_count", 0) or last.get("nb_alarmes_final", 0)),
+        "trust_score": _as_float_or_none(trust_ev.get("confidence_in_metrics")),
+        "trust_label": trust_ev.get("confidence_label", ""),
     }
 
-def _build_alarms(memory: dict) -> list:
-    """Extrait les alarmes depuis la mémoire long terme."""
+
+def _build_alarms(memory: dict[str, Any], dataset: str | None = None) -> list[dict[str, Any]]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("alarms"), list):
+        return payload["alarms"]
+
     sessions = memory.get("sessions", [])
     if not sessions:
         return []
     donnees = sessions[-1].get("donnees", {})
     alarmes = donnees.get("alarmes", [])
-    if not isinstance(alarmes, list):
-        return []
-    result = []
-    for a in alarmes:
-        if isinstance(a, dict):
-            result.append(a)
-    return result
+    return [a for a in alarmes if isinstance(a, dict)]
 
-def _build_engine_scores(events: list, memory: dict) -> list:
-    """Construit les scores par moteur depuis les events JSONL.
-       Utilise threshold_snapshots de l'événement SESSION_SUMMARY pour
-       obtenir les seuils réels du Pass 1 et du Pass 2.
-    """
-    # 1. Récupérer l'événement SESSION_SUMMARY (le dernier de la session)
+
+def _build_engine_scores(events: list[dict[str, Any]], memory: dict[str, Any], dataset: str | None = None) -> list[dict[str, Any]]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("engine_scores"), list):
+        return payload["engine_scores"]
+
     summary = _get_event(events, "SESSION_SUMMARY")
     snapshots = summary.get("threshold_snapshots", [])
-    
-    # snapshots[0] = Pass 1, snapshots[1] = Pass 2 (s'il existe)
     pass1_snap = snapshots[0] if snapshots else {}
-    pass2_snap = snapshots[1] if len(snapshots) > 1 else pass1_snap
-    
-    # 2. Compter les alarmes par domaine (toujours depuis PASS1_COMPLETE,
-    #    car c'est le décompte final après fusion éventuelle)
+    pass2_snap = snapshots[-1] if snapshots else pass1_snap
     pass1_event = _get_event(events, "PASS1_COMPLETE")
     by_domain = pass1_event.get("alarms_by_domain", {})
-    
-    engines = ["SSH", "WEB", "FTP", "KERNEL", "SESSION"]
+
     result = []
-    
-    for eng in engines:
-        count = int(by_domain.get(eng, 0))
+    for eng in ["SSH", "WEB", "FTP", "KERNEL", "SESSION"]:
         eng_lower = eng.lower()
-        
-        # Seuils depuis les snapshots (valeurs par défaut si absentes)
+        count = int(by_domain.get(eng, 0))
         pass1_thresh = pass1_snap.get(f"{eng_lower}_high", 50)
         pass2_thresh = pass2_snap.get(f"{eng_lower}_high", pass1_thresh)
-        
-        # Statut ALARM si count > seuil du Pass 1 (cohérence avec l'affichage)
-        status = "ALARM" if count > pass1_thresh else "CLEAR"
-        rerun_p2 = bool(pass2_snap.get("rerun_engines"))  # ou vérifier si pass2_thresh != pass1_thresh
-        
         result.append({
             "engine": eng,
             "alarms": count,
             "score": min(100, count * 5),
             "pass1": pass1_thresh,
             "pass2": pass2_thresh,
-            "status": status,
-            "rerun_p2": rerun_p2,
+            "status": "ALARM" if count > pass1_thresh else "CLEAR",
+            "rerun_p2": bool(pass2_snap.get("rerun_engines")),
         })
-    
     return result
 
-def _build_decisions(events: list, memory: dict) -> list:
-    """Extrait les décisions agents depuis les events JSONL."""
-    decisions = []
-    for e in events:
+
+def _build_decisions(events: list[dict[str, Any]], dataset: str | None = None) -> list[dict[str, Any]]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("decisions"), list):
+        return payload["decisions"]
+    return [
+        e for e in events
         if isinstance(e, dict) and e.get("event_type") in (
-            "DYNAMIC_CONFIG_DEFAULT", "DYNAMIC_CONFIG_APPLIED", "AGENTS_COMPLETE"
-        ):
-            decisions.append(e)
-    return decisions[-20:]
+            "DYNAMIC_CONFIG_DEFAULT",
+            "DYNAMIC_CONFIG_ISSUED",
+            "AGENTS_COMPLETE",
+        )
+    ][-20:]
 
-def _build_log_lines(events: list) -> list:
-    """Extrait les lignes de log lisibles depuis les events."""
+
+def _build_log_lines(events: list[dict[str, Any]], dataset: str | None = None) -> list[str]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("log_lines"), list):
+        return payload["log_lines"]
     lines = []
-    for e in events:
-        if not isinstance(e, dict):
-            continue
-        ev = e.get("event_type", "")
-        ts = e.get("ts", e.get("timestamp", ""))
-        msg = e.get("message") or e.get("msg") or ev
-        if msg:
-            lines.append(f"[{ts}] {msg}" if ts else msg)
-    return lines
+    for event in events:
+        ts = event.get("timestamp", "")
+        msg = event.get("message") or event.get("msg") or event.get("event_type", "")
+        lines.append(f"[{ts}] {msg}" if ts else str(msg))
+    return lines[-60:]
 
-def _build_trust(events: list) -> dict:
-    """Extrait le trust gate depuis les events."""
+
+def _build_trust(events: list[dict[str, Any]], dataset: str | None = None) -> dict[str, Any]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("trust"), dict):
+        base = dict(payload["trust"])
+        base.setdefault("available", True)
+        return base
     trust_ev = _get_event(events, "TRUST_COMPUTED")
     if not trust_ev:
         return {
-            "available":             False,
-            "model_agreement":       None,
-            "false_positive_rate":   None,
-            "drift_score":           None,
-            "drift_label":           "N/A",
-            "drift_flagged":         False,
-            "stability":             "N/A",
-            "stable_signals":        None,
-            "noise_ratio":           None,
-            "ml_score_weight":       None,
+            "available": False,
+            "model_agreement": None,
+            "false_positive_rate": None,
+            "drift_score": None,
+            "drift_label": "N/A",
+            "drift_flagged": False,
+            "stability": "N/A",
+            "stable_signals": None,
+            "noise_ratio": None,
+            "ml_score_weight": None,
             "confidence_in_metrics": None,
-            "confidence_label":      "N/A",
-            "signals_summary":       "No TRUST_COMPUTED event found — run the pipeline once.",
-            "timestamp":             "",
+            "confidence_label": "N/A",
+            "signals_summary": "No TRUST_COMPUTED event found.",
+            "timestamp": "",
         }
-
     return {
-        "available":             True,
-        "model_agreement":       _as_float_or_none(trust_ev.get("model_agreement")),
-        "false_positive_rate":   _as_float_or_none(trust_ev.get("false_positive_rate")),
-        "drift_score":           _as_float_or_none(trust_ev.get("drift_score")),
-        "drift_label":           trust_ev.get("drift_label", trust_ev.get("drift", "UNKNOWN")),
-        "drift_flagged":         bool(trust_ev.get("drift_flagged", False)),
-        "stability":             trust_ev.get("stability", ""),
-        "stable_signals":        trust_ev.get("stable_signals"),
-        "noise_ratio":           trust_ev.get("noise_ratio"),
-        "ml_score_weight":       trust_ev.get("ml_score_weight"),
-        "confidence_in_metrics": _as_float_or_none(
-            trust_ev.get("confidence_in_metrics") or trust_ev.get("confidence")
-        ),
-        "confidence_label":      trust_ev.get("confidence_label") or trust_ev.get("label", "UNKNOWN"),
-        "signals_summary":       trust_ev.get("signals_summary", ""),
-        "timestamp":             trust_ev.get("timestamp", ""),
+        "available": True,
+        "model_agreement": _as_float_or_none(trust_ev.get("model_agreement")),
+        "false_positive_rate": _as_float_or_none(trust_ev.get("false_positive_rate")),
+        "drift_score": _as_float_or_none(trust_ev.get("drift_score")),
+        "drift_label": trust_ev.get("drift_label", "UNKNOWN"),
+        "drift_flagged": bool(trust_ev.get("drift_flagged", False)),
+        "stability": trust_ev.get("stability", ""),
+        "stable_signals": trust_ev.get("stable_signals"),
+        "noise_ratio": trust_ev.get("noise_ratio"),
+        "ml_score_weight": trust_ev.get("ml_score_weight"),
+        "confidence_in_metrics": _as_float_or_none(trust_ev.get("confidence_in_metrics")),
+        "confidence_label": trust_ev.get("confidence_label", "UNKNOWN"),
+        "signals_summary": trust_ev.get("signals_summary", ""),
+        "timestamp": trust_ev.get("timestamp", ""),
     }
 
-def _build_gate_history() -> list:
-    """Lit l'historique des gates depuis la mémoire."""
-    mem = _load_memory()
-    return list(reversed(mem.get("gate_history", [])[-20:]))
 
-def _build_data_quality(events: list) -> dict:
-    """Extrait les métriques qualité données depuis les events."""
+def _build_data_quality(events: list[dict[str, Any]], dataset: str | None = None) -> dict[str, Any]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("data_quality"), dict):
+        return payload["data_quality"]
     pipeline_start = _get_event(events, "PIPELINE_START")
-    metrics        = _get_event(events, "METRICS_COMPUTED")
     return {
-        "raw_rows":    int(metrics.get("raw_rows", 0)),
-        "dedup_rows":  int(metrics.get("dedup_count", 0)),
-        "noise_pct":   _as_float_or_none(metrics.get("noise_pct")),
-        "ml_weight":   _as_float_or_none(metrics.get("ml_weight")),
+        "raw_rows": int(pipeline_start.get("row_count", 0)),
+        "dedup_rows": int(pipeline_start.get("deduped_count", 0)),
+        "noise_pct": _as_float_or_none(pipeline_start.get("noise_ratio")),
+        "ml_weight": _as_float_or_none(pipeline_start.get("ml_score_weight")),
         "data_sources": pipeline_start.get("data_sources", []),
     }
 
-# ── Router ────────────────────────────────────────────────────
 
-router = APIRouter(prefix="/api", tags=["dashboard"])
+def _build_sessions(memory: dict[str, Any], dataset: str | None = None) -> list[dict[str, Any]]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("sessions"), list):
+        return payload["sessions"]
+    result = []
+    for session in reversed(memory.get("sessions", [])[-20:]):
+        data = session.get("donnees", {})
+        result.append({
+            "date": session.get("date", ""),
+            "threat_level": data.get("agent_threat_level", "NORMAL"),
+            "nb_alarms_pass1": data.get("nb_alarmes_pass1", 0),
+            "nb_alarms_final": data.get("nb_alarmes_final", 0),
+            "pass2_ran": bool(data.get("pass2_ran", False)),
+            "health_score": _as_float_or_none(data.get("health_score")),
+            "ips_suspectes": data.get("ips_suspectes", []),
+            "attack_pattern": data.get("attack_pattern", ""),
+        })
+    return result
 
-# ── Mapping label frontend → moteurs backend ──────────────────
-_LABEL_TO_ENGINES: dict[str, list[str]] = {
-    "auth":   ["SSH"],
-    "web":    ["WEB"],
-    "ftp":    ["FTP"],
-    "kernel": ["KERNEL", "SESSION"],
-}
 
-_LABEL_DISPLAY: dict[str, str] = {
-    "auth":   "SSH Auth",
-    "web":    "Web Server",
-    "ftp":    "FTP Server",
-    "kernel": "Kernel/Sys",
-}
+def _filter_alarms_by_servers(all_alarms: list[dict[str, Any]], servers: list[str]) -> list[dict[str, Any]]:
+    if not servers:
+        return all_alarms
+    server_set = {s.lower() for s in servers}
+    result = []
+    for alarm in all_alarms:
+        server_id = str(alarm.get("server_id") or "").lower()
+        engine = str(alarm.get("engine") or alarm.get("domain") or "").upper()
+        label = _ENGINE_TO_LABEL.get(engine, "")
+        if server_id and server_id in server_set:
+            result.append(alarm)
+        elif label and label in server_set:
+            result.append(alarm)
+    return result
 
-_S3_KEYWORD_TO_LABEL: list[tuple[str, str]] = [
-    ("sshd",    "auth"), ("auth",   "auth"), ("secure", "auth"), ("ssh",    "auth"),
-    ("nginx",   "web"),  ("apache", "web"),  ("access", "web"),  ("http",   "web"),  ("web",    "web"),
-    ("vsftpd",  "ftp"),  ("xferlog","ftp"),  ("xfer",   "ftp"),  ("ftp",    "ftp"),
-    ("kern",    "kernel"),("dmesg", "kernel"),("syslog","kernel"),("system","kernel"),("kernel","kernel"),
-]
-
-_VALID_LABELS = set(_LABEL_TO_ENGINES.keys())
-
-def _s3_id_to_label(server_id: str) -> str | None:
-    lower = server_id.lower()
-    for keyword, label in _S3_KEYWORD_TO_LABEL:
-        if keyword in lower:
-            return label
-    return None
 
 def _engines_for_servers(servers: list[str]) -> set[str]:
     engines: set[str] = set()
-    for s in servers:
-        label = s.lower()
+    for server in servers:
+        label = server.lower()
         if label in _LABEL_TO_ENGINES:
             engines.update(_LABEL_TO_ENGINES[label])
-        else:
-            inferred = _s3_id_to_label(s)
-            if inferred:
-                engines.update(_LABEL_TO_ENGINES[inferred])
-            else:
-                print(f"[WARN][api_dashboard] Unknown server label: '{s}' — ignoré")
     return engines
 
-# ── /api/health ───────────────────────────────────────────────
+
+def _make_display_name(dataset_id: str) -> str:
+    parts = dataset_id.split("_")
+    if len(parts) >= 3 and parts[-2].count("-") == 2:
+        return f"{parts[-2]} {parts[-1].replace('-', ':')}"
+    return dataset_id
+
+
 @router.get("/health")
-def api_health() -> dict:
+def api_health() -> dict[str, Any]:
     latest_files = sorted(glob.glob(str(OUTPUT_DIR / "session_*.jsonl")))
     return {
-        "status":              "ok",
-        "version":             "2.0",
-        "timestamp":           datetime.now().isoformat(),
-        "memory_file_exists":  MEMORY_FILE.exists(),
-        "output_dir_exists":   OUTPUT_DIR.exists(),
+        "status": "ok",
+        "version": "3.0",
+        "timestamp": datetime.now().isoformat(),
+        "memory_file_exists": MEMORY_FILE.exists(),
+        "output_dir_exists": OUTPUT_DIR.exists(),
         "latest_session_file": Path(latest_files[-1]).name if latest_files else None,
+        "available_datasets": _available_dataset_ids(),
     }
 
 
-@router.get("/prediction")
-@router.get("/prediction")
-def api_prediction() -> dict:
-    events = _latest_jsonl()
-    prediction_event = _get_event(events, "PREDICTION_COMPUTED")
+@router.get("/datasets")
+def api_datasets(format: str = Query(default="list")):
+    datasets = _available_dataset_ids()
+    expose_fusion = _should_expose_fusion_dataset(datasets)
+    if format == "rich":
+        items = [
+            {
+                "id": dataset_id,
+                "label": dataset_id,
+                "display": _make_display_name(dataset_id),
+                "sources": [dataset_id],
+            }
+            for dataset_id in datasets
+        ]
+        if expose_fusion:
+            items.append({
+                "id": "fusion",
+                "label": "fusion",
+                "display": FUSION_LABEL,
+                "sources": datasets,
+            })
+        return items
+    if expose_fusion:
+        return datasets + ["fusion"]
+    return datasets
 
+
+@router.get("/servers")
+def api_servers(format: str = Query(default="list"), dataset: str | None = Query(default=None)):
+    payload = _get_dataset_payload(dataset)
+    if payload:
+        server_ids = list(payload.get("server_ids") or [payload.get("dataset_id")])
+        if format == "rich":
+            return [
+                {"id": sid, "label": sid, "display": _make_display_name(sid), "sources": [sid]}
+                for sid in server_ids
+            ]
+        return server_ids
+    return api_datasets(format=format)
+
+
+@router.get("/prediction")
+def api_prediction(dataset: str | None = Query(default=None)) -> dict[str, Any]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("prediction"), dict):
+        return payload["prediction"]
+
+    events = _latest_jsonl(dataset)
+    prediction_event = _get_event(events, "PREDICTION_COMPUTED")
     if not prediction_event:
         return {
             "available": False,
             "prediction_score": 0,
             "flags": [],
             "predicted_events": [],
-            "message": "Aucune prévision disponible – exécutez le pipeline.",
+            "message": "Aucune prevision disponible.",
             "risk_evolution": [],
             "behavioral_analysis": {},
             "prevention_suggestions": [],
@@ -336,345 +477,196 @@ def api_prediction() -> dict:
             "explanations": [],
             "history": [],
         }
-
-    signals = prediction_event.get("signals", {})
-    prediction_score = int(prediction_event.get("prediction_score", 0) or 0)
-
-    # Risk evolution from history
-    history = prediction_event.get("history", [])
-    risk_evolution = [
-        {"time": h["timestamp"], "risk": h["score"], "failures": 0}
-        for h in history
-    ]
-
-    # Behavioral analysis from signal_analysis
-    signal_analysis = prediction_event.get("signal_analysis", {})
-    behavioral_analysis = {
-        "ssh_failures_trend": signal_analysis.get("failures", {}).get("trend_ratio", 1.0),
-        "unique_ips_trend": signal_analysis.get("unique_ips", {}).get("trend_ratio", 1.0),
-        "username_diversity": signal_analysis.get("usernames", {}).get("last", 0),
-        "ftp_activity": signal_analysis.get("ftp_events", {}).get("last", 0),
-        "kernel_errors": signal_analysis.get("kernel_errors", {}).get("last", 0),
-    }
-
-    # Prevention suggestions based on flags
-    flags = list(prediction_event.get("flags", []) or [])
-    prevention_suggestions = []
-    if "BOTNET_WARMUP" in flags:
-        prevention_suggestions.append("Augmenter la surveillance des IPs multiples")
-    if "SPRAY_PHASE" in flags:
-        prevention_suggestions.append("Activer le rate limiting sur SSH")
-    if "CRASH_COMING" in flags:
-        prevention_suggestions.append("Vérifier la charge système et redémarrer si nécessaire")
-    if "DATA_EXFIL_START" in flags:
-        prevention_suggestions.append("Bloquer les transferts FTP suspects")
-
-    risk_level = "LOW"
-    if prediction_score >= 70:
-        risk_level = "CRITICAL"
-    elif prediction_score >= 40:
-        risk_level = "HIGH"
-    elif prediction_score >= 20:
-        risk_level = "MEDIUM"
-
     return {
         "available": True,
-        "prediction_score": prediction_score,
-        "flags": flags,
+        "prediction_score": int(prediction_event.get("prediction_score", 0) or 0),
+        "flags": list(prediction_event.get("flags", []) or []),
         "predicted_events": list(prediction_event.get("predicted_events", []) or []),
-        "message": str(prediction_event.get("message", "Prévision calculée")),
-        "risk_evolution": risk_evolution,
-        "behavioral_analysis": behavioral_analysis,
-        "prevention_suggestions": prevention_suggestions,
-        "risk_level": risk_level,
-        "signal_analysis": signal_analysis,
+        "message": str(prediction_event.get("message", "")),
+        "risk_evolution": [
+            {"time": h["timestamp"], "risk": h["score"], "failures": 0}
+            for h in prediction_event.get("history", [])
+        ],
+        "behavioral_analysis": prediction_event.get("signal_analysis", {}),
+        "prevention_suggestions": [],
+        "risk_level": "LOW",
+        "signal_analysis": prediction_event.get("signal_analysis", {}),
         "explanations": prediction_event.get("explanations", []),
-        "history": history,
+        "history": prediction_event.get("history", []),
     }
-# ── /api/servers ──────────────────────────────────────────────
-@router.get("/servers")
-def api_servers(format: str = Query(default="list")) -> list:
-    memory   = _load_memory()
-    sessions = memory.get("sessions", [])
-    raw_ids: list[str] = []
 
-    if sessions:
-        donnees = sessions[-1].get("donnees", {})
-        for key in ("serveurs_actifs", "server_ids"):
-            s = donnees.get(key)
-            if isinstance(s, list) and s:
-                raw_ids = [str(x) for x in s if x]
-                break
-        if not raw_ids:
-            alarmes = donnees.get("alarmes", [])
-            if isinstance(alarmes, list):
-                seen: set[str] = set()
-                for a in alarmes:
-                    if isinstance(a, dict):
-                        sid = a.get("server_id") or a.get("Serveur")
-                        if sid:
-                            seen.add(str(sid))
-                if seen:
-                    raw_ids = sorted(seen)
 
-    if not raw_ids:
-        try:
-            events = _latest_jsonl()
-            ps = _get_event(events, "PIPELINE_START")
-            sources = ps.get("data_sources", [])
-            if isinstance(sources, list) and sources:
-                raw_ids = [str(s) for s in sources if s]
-        except Exception:
-            pass
-
-    labels_found: set[str] = set()
-
-    for raw_id in raw_ids:
-        if raw_id.lower() in _VALID_LABELS:
-            labels_found.add(raw_id.lower())
-        else:
-            inferred = _s3_id_to_label(raw_id)
-            if inferred:
-                labels_found.add(inferred)
-
-    if not labels_found:
-        _ENGINE_TO_LABEL_LOCAL = {
-            "SSH": "auth", "WEB": "web", "FTP": "ftp",
-            "KERNEL": "kernel", "SESSION": "kernel",
-            "PREDICTION": "kernel", "CORRELATION": "auth",
-        }
-        try:
-            all_alarms = _build_alarms(_load_memory())
-            for a in all_alarms:
-                engine = str(a.get("engine") or "").upper()
-                label  = _ENGINE_TO_LABEL_LOCAL.get(engine, "")
-                if label:
-                    labels_found.add(label)
-        except Exception as e:
-            print(f"[WARN][api_dashboard] Fallback alarmes échoué: {e}")
-
-    if not labels_found:
-        try:
-            events  = _latest_jsonl()
-            scores  = _build_engine_scores(events, _load_memory())
-            active  = {str(s.get("engine", "")).upper() for s in scores if s.get("engine")}
-            for label, engs in _LABEL_TO_ENGINES.items():
-                if any(e in active for e in engs):
-                    labels_found.add(label)
-        except Exception as e:
-            print(f"[WARN][api_dashboard] Fallback engine-scores échoué: {e}")
-
-    if not labels_found:
-        return []
-
-    ordered = [l for l in ["auth", "web", "ftp", "kernel"] if l in labels_found]
-    ordered += sorted(labels_found - set(ordered))
-
-    if format == "rich":
-        return [{"id": l, "label": l, "display": _LABEL_DISPLAY.get(l, l), "sources": [l]} for l in ordered]
-    return ordered
-
-# ── /api/kpis ─────────────────────────────────────────────────
 @router.get("/kpis")
-def api_kpis(servers: List[str] = Query(default=[])) -> dict:
-    def load_all():
-        return _build_kpis(_latest_jsonl(), _load_memory())
-
-    if not servers:
-        return _cached("kpis", load_all)
-
-    engines   = _engines_for_servers(servers)
-    cache_key = f"kpis_{'_'.join(sorted(servers))}"
-
-    def load_filtered():
-        events = _latest_jsonl()
-        base   = _build_kpis(events, _load_memory())
+def api_kpis(
+    servers: List[str] = Query(default=[]),
+    dataset: str | None = Query(default=None),
+) -> dict[str, Any]:
+    cache_key = f"kpis::{dataset or 'default'}::{','.join(sorted(servers))}"
+    def load():
+        events = _latest_jsonl(dataset)
+        memory = _load_memory(dataset)
+        base = dict(_build_kpis(events, memory, dataset))
+        if not servers:
+            return base
+        engines = _engines_for_servers(servers)
         if not engines:
             return base
+        all_scores = _build_engine_scores(events, memory, dataset)
+        base["nb_alarms"] = sum(int(s.get("alarms", 0)) for s in all_scores if s.get("engine") in engines)
         if "SSH" not in engines:
             base["ssh_failures"] = None
-            base["blocked_ips"]  = None
-        pass1  = _get_event(events, "PASS1_COMPLETE")
-        by_dom = pass1.get("alarms_by_domain", {})
-        active = {eng for eng in engines if int(by_dom.get(eng, 0)) > 0}
-        if not active:
-            base.update({
-                "ssh_failures": 0, "blocked_ips": 0,
-                "alert_status": "CLEAR", "health_score": 100.0,
-                "unique_attacking_ips": 0, "attack_velocity": 0.0,
-                "is_velocity_spike": False,
-            })
+            base["blocked_ips"] = None
         return base
+    return _cached(cache_key, load)
 
-    return _cached(cache_key, load_filtered)
 
-# ── Filtre alarmes ─────────────────────────────────────────────
-_ENGINE_TO_LABEL: dict[str, str] = {
-    "SSH": "auth", "WEB": "web", "FTP": "ftp",
-    "KERNEL": "kernel", "SESSION": "kernel",
-    "PREDICTION": "kernel", "CORRELATION": "auth",
-}
-
-def _filter_alarms_by_servers(all_alarms: list[dict], servers: list[str]) -> list[dict]:
-    servers_set = {s.lower() for s in servers}
-    result = []
-    for a in all_alarms:
-        sid = str(a.get("server_id") or "").lower()
-        if sid and sid in servers_set:
-            result.append(a)
-            continue
-        engine = str(a.get("engine") or "").upper()
-        label  = _ENGINE_TO_LABEL.get(engine, "")
-        if label and label in servers_set:
-            result.append(a)
-    return result
-
-# ── /api/alarms ───────────────────────────────────────────────
 @router.get("/alarms")
-def api_alarms(servers: List[str] = Query(default=[])) -> list:
-    def load_all():
-        return _build_alarms(_load_memory())
-    if not servers:
-        return _cached("alarms", load_all)
-    cache_key = f"alarms_{'_'.join(sorted(servers))}"
-    def load_filtered():
-        return _filter_alarms_by_servers(_build_alarms(_load_memory()), servers)
-    return _cached(cache_key, load_filtered)
+def api_alarms(
+    servers: List[str] = Query(default=[]),
+    dataset: str | None = Query(default=None),
+) -> list[dict[str, Any]]:
+    cache_key = f"alarms::{dataset or 'default'}::{','.join(sorted(servers))}"
+    def load():
+        alarms = _build_alarms(_load_memory(dataset), dataset)
+        return _filter_alarms_by_servers(alarms, servers)
+    return _cached(cache_key, load)
 
-# ── /api/engine-scores ────────────────────────────────────────
+
 @router.get("/engine-scores")
-def api_engine_scores(servers: List[str] = Query(default=[])) -> list:
-    def load_all():
-        return _build_engine_scores(_latest_jsonl(), _load_memory())
-    if not servers:
-        return _cached("engine_scores", load_all)
-    engines   = _engines_for_servers(servers)
-    cache_key = f"engine_scores_{'_'.join(sorted(servers))}"
-    def load_filtered():
-        all_scores = _build_engine_scores(_latest_jsonl(), _load_memory())
-        if not engines:
-            return all_scores
-        return [s for s in all_scores if s.get("engine", "").upper() in engines]
-    return _cached(cache_key, load_filtered)
+def api_engine_scores(
+    servers: List[str] = Query(default=[]),
+    dataset: str | None = Query(default=None),
+) -> list[dict[str, Any]]:
+    cache_key = f"engine_scores::{dataset or 'default'}::{','.join(sorted(servers))}"
+    def load():
+        events = _latest_jsonl(dataset)
+        memory = _load_memory(dataset)
+        scores = _build_engine_scores(events, memory, dataset)
+        if not servers:
+            return scores
+        engines = _engines_for_servers(servers)
+        return [score for score in scores if str(score.get("engine", "")).upper() in engines]
+    return _cached(cache_key, load)
 
-# ── /api/sessions ─────────────────────────────────────────────
+
 @router.get("/sessions")
-def api_sessions() -> list:
-    def load():
-        mem  = _load_memory()
-        sess = mem.get("sessions", [])
-        result = []
-        for s in reversed(sess[-20:]):
-            d = s.get("donnees", {})
-            result.append({
-                "date":            s.get("date", ""),
-                "threat_level":    d.get("agent_threat_level", "NORMAL"),
-                "nb_alarms_pass1": d.get("nb_alarmes_pass1", 0),
-                "nb_alarms_final": d.get("nb_alarmes_final", 0),
-                "pass2_ran":       bool(d.get("pass2_ran", False)),
-                "health_score":    _as_float_or_none(d.get("health_score")),
-                "ips_suspectes":   d.get("ips_suspectes", []),
-                "attack_pattern":  d.get("attack_pattern", ""),
-            })
-        return result
-    return _cached("sessions", load)
+def api_sessions(dataset: str | None = Query(default=None)) -> list[dict[str, Any]]:
+    return _cached(f"sessions::{dataset or 'default'}", lambda: _build_sessions(_load_memory(dataset), dataset))
 
-# ── /api/decisions ────────────────────────────────────────────
+
 @router.get("/decisions")
-def api_decisions() -> list:
-    def load():
-        return _build_decisions(_latest_jsonl(), _load_memory())
-    return _cached("decisions", load)
+def api_decisions(dataset: str | None = Query(default=None)) -> list[dict[str, Any]]:
+    return _cached(
+        f"decisions::{dataset or 'default'}",
+        lambda: _build_decisions(_latest_jsonl(dataset), dataset),
+    )
 
-# ── /api/pipeline/latest ──────────────────────────────────────
+
 @router.get("/pipeline/latest")
-def api_pipeline_latest() -> dict:
+def api_pipeline_latest(dataset: str | None = Query(default=None)) -> dict[str, Any]:
     def load():
-        events = _latest_jsonl()
+        payload = _get_dataset_payload(dataset)
+        if payload:
+            return {
+                "events": [e for e in payload.get("events", []) if isinstance(e, dict)][-150:],
+                "log_lines": list(payload.get("log_lines", []))[-60:],
+                "step_count": len(payload.get("events", [])),
+            }
+        events = _latest_jsonl(dataset)
         return {
-            "events":     [e for e in events if isinstance(e, dict)][-150:],
-            "log_lines":  _build_log_lines(events)[-60:],
+            "events": [e for e in events if isinstance(e, dict)][-150:],
+            "log_lines": _build_log_lines(events, dataset)[-60:],
             "step_count": len(events),
         }
-    return _cached("pipeline_latest", load)
+    return _cached(f"pipeline_latest::{dataset or 'default'}", load)
 
-# ── /api/trust ────────────────────────────────────────────────
+
 @router.get("/trust")
-def api_trust() -> dict:
-    def load():
-        return _build_trust(_latest_jsonl())
-    return _cached("trust", load)
+def api_trust(dataset: str | None = Query(default=None)) -> dict[str, Any]:
+    return _cached(f"trust::{dataset or 'default'}", lambda: _build_trust(_latest_jsonl(dataset), dataset))
 
-# ── /api/gate-history ─────────────────────────────────────────
+
 @router.get("/gate-history")
-def api_gate_history() -> list:
-    def load():
-        return _build_gate_history()
-    return _cached("gate_history", load)
+def api_gate_history(dataset: str | None = Query(default=None)) -> list[dict[str, Any]]:
+    memory = _load_memory(dataset)
+    return list(reversed(memory.get("gate_history", [])[-20:]))
 
-# ── /api/data-quality ─────────────────────────────────────────
+
 @router.get("/data-quality")
-def api_data_quality() -> dict:
-    def load():
-        return _build_data_quality(_latest_jsonl())
-    return _cached("data_quality", load)
+def api_data_quality(dataset: str | None = Query(default=None)) -> dict[str, Any]:
+    return _cached(
+        f"data_quality::{dataset or 'default'}",
+        lambda: _build_data_quality(_latest_jsonl(dataset), dataset),
+    )
 
-# ── /api/memory ───────────────────────────────────────────────
+
 @router.get("/memory")
-def api_memory() -> dict:
-    def load():
-        return _load_memory()
-    return _cached("memory", load)
+def api_memory(dataset: str | None = Query(default=None)) -> dict[str, Any]:
+    return _cached(f"memory::{dataset or 'default'}", lambda: _load_memory(dataset))
 
-# ── /api/suspicious-ips ───────────────────────────────────────
+
 @router.get("/suspicious-ips")
-def api_suspicious_ips() -> dict:
-    def load():
-        return {"ips": _load_memory().get("ips_suspectes", [])}
-    return _cached("suspicious_ips", load)
+def api_suspicious_ips(dataset: str | None = Query(default=None)) -> dict[str, Any]:
+    memory = _load_memory(dataset)
+    return {"ips": memory.get("ips_suspectes", [])}
 
-# ── /api/logs/stream ──────────────────────────────────────────
+
 @router.get("/logs/stream")
-def api_logs_stream() -> dict:
-    def load():
-        return {"lines": _build_log_lines(_latest_jsonl())[-60:]}
-    return _cached("logs", load)
+def api_logs_stream(dataset: str | None = Query(default=None)) -> dict[str, Any]:
+    return {
+        "lines": _build_log_lines(_latest_jsonl(dataset), dataset)[-60:],
+    }
 
-# ── /api/backtest-history ─────────────────────────────────────
+
 @router.get("/backtest-history")
-def api_backtest_history() -> list:
-    def load():
-        return list(reversed(_load_memory().get("backtest_history", [])))
-    return _cached("backtest_history", load)
+def api_backtest_history(dataset: str | None = Query(default=None)) -> list[dict[str, Any]]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("backtest_history"), list):
+        return payload["backtest_history"]
+    memory = _load_memory(dataset)
+    return list(reversed(memory.get("backtest_history", [])))
 
-# ── Minimization (buffer temps-réel) ──────────────────────────
-_MINIMIZATION_BUFFER: deque = deque(maxlen=20)
 
-def _push_minimization_point(nb_alarmes: int, health_score: float = 100.0) -> None:
-    _MINIMIZATION_BUFFER.append({
+def _push_minimization_point(nb_alarmes: int, health_score: float = 100.0, dataset_id: str | None = None) -> None:
+    selected = _resolve_selected_dataset(dataset_id)
+    if not selected:
+        return
+    payload = PIPELINE_RESULTS.get(selected)
+    if not payload:
+        return
+    payload.setdefault("minimization", []).append({
         "timestamp": datetime.now().strftime("%H:%M:%S"),
-        "alarmes":   nb_alarmes,
-        "risque":    max(0, round(100 - health_score, 1)),
+        "alarmes": nb_alarmes,
+        "risque": max(0, round(100 - health_score, 1)),
     })
+    payload["minimization"] = payload["minimization"][-20:]
+
 
 @router.get("/minimization")
-def api_minimization() -> list:
-    if _MINIMIZATION_BUFFER:
-        return list(_MINIMIZATION_BUFFER)
-    mem = _load_memory()
-    sessions = mem.get("sessions", [])[-20:]
+def api_minimization(dataset: str | None = Query(default=None)) -> list[dict[str, Any]]:
+    payload = _get_dataset_payload(dataset)
+    if payload and isinstance(payload.get("minimization"), list):
+        return payload["minimization"]
+    memory = _load_memory(dataset)
     series = []
-    for s in sessions:
-        d = s.get("donnees", {})
-        nb  = d.get("nb_alarmes_final", d.get("nb_anomalies", 0))
-        hs  = d.get("health_score", 100.0)
+    for session in memory.get("sessions", [])[-20:]:
+        data = session.get("donnees", {})
         try:
-            t = datetime.fromisoformat(s.get("date", "")).strftime("%H:%M")
+            timestamp = datetime.fromisoformat(session.get("date", "")).strftime("%H:%M")
         except Exception:
-            t = "?"
+            timestamp = "?"
+        health = float(data.get("health_score", 100) or 100)
         series.append({
-            "timestamp": t,
-            "alarmes":   int(nb) if nb is not None else 0,
-            "risque":    max(0, round(100 - float(hs or 100), 1)),
+            "timestamp": timestamp,
+            "alarmes": int(data.get("nb_alarmes_final", 0) or 0),
+            "risque": max(0, round(100 - health, 1)),
         })
     return series
+
+
+@router.get("/fusion/summary")
+def api_fusion_summary() -> dict[str, Any]:
+    payload = PIPELINE_RESULTS.get(LEGACY_MERGED_DATASET)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Fusion view not available")
+    return dict(payload.get("fusion") or {})

@@ -17,13 +17,56 @@ import json
 import statistics
 import tempfile
 import os
+import re
 from collections import Counter
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 import shutil, tempfile, os
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MEMORY_FILE  = PROJECT_ROOT / "long_term_memory.json"
+_ACTIVE_DATASET_ID: ContextVar[str | None] = ContextVar("active_dataset_id", default=None)
+
+
+def _sanitize_dataset_id(dataset_id: str | None) -> str | None:
+    if dataset_id is None:
+        return None
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(dataset_id).strip())
+    return cleaned or None
+
+
+def get_active_dataset() -> str | None:
+    return _ACTIVE_DATASET_ID.get() or _sanitize_dataset_id(os.getenv("PIPELINE_ACTIVE_DATASET"))
+
+
+def set_active_dataset(dataset_id: str | None):
+    dataset = _sanitize_dataset_id(dataset_id)
+    if dataset:
+        os.environ["PIPELINE_ACTIVE_DATASET"] = dataset
+    else:
+        os.environ.pop("PIPELINE_ACTIVE_DATASET", None)
+    return _ACTIVE_DATASET_ID.set(dataset)
+
+
+def reset_active_dataset(token) -> None:
+    _ACTIVE_DATASET_ID.reset(token)
+
+
+def get_memory_file(dataset_id: str | None = None) -> Path:
+    dataset = _sanitize_dataset_id(dataset_id) or get_active_dataset()
+    if not dataset:
+        return MEMORY_FILE
+    return PROJECT_ROOT / f"memory_{dataset}.json"
+
+
+def _resolve_memory_file(
+    memory_file: str | Path | None = None,
+    dataset_id: str | None = None,
+) -> Path:
+    if memory_file is not None:
+        return Path(memory_file)
+    return get_memory_file(dataset_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,25 +98,30 @@ def _structure_vide() -> dict:
 # Principe : écrire dans un .tmp → os.replace() (opération atomique sur Linux/Windows)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _ecrire_memoire(memoire: dict) -> None:
-    dir_parent = MEMORY_FILE.parent
+def _ecrire_memoire(
+    memoire: dict,
+    memory_file: str | Path | None = None,
+    dataset_id: str | None = None,
+) -> None:
+    target_file = _resolve_memory_file(memory_file, dataset_id)
+    dir_parent = target_file.parent
     dir_parent.mkdir(parents=True, exist_ok=True)
 
     fd, tmp_path = tempfile.mkstemp(dir=dir_parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(memoire, f, indent=2, ensure_ascii=False)
-        if MEMORY_FILE.exists():
+        if target_file.exists():
             try:
-                MEMORY_FILE.unlink()
+                target_file.unlink()
             except PermissionError:
-                backup = str(MEMORY_FILE) + ".bak"
-                shutil.copy2(str(MEMORY_FILE), backup)
-                MEMORY_FILE.unlink()
-        os.replace(tmp_path, MEMORY_FILE)
+                backup = str(target_file) + ".bak"
+                shutil.copy2(str(target_file), backup)
+                target_file.unlink()
+        os.replace(tmp_path, target_file)
     except PermissionError:
         # Fallback: plain write without atomicity
-        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+        with open(target_file, "w", encoding="utf-8") as f:
             json.dump(memoire, f, indent=2, ensure_ascii=False)
         print("[WARN] Atomic replace failed – used direct write instead.")
     finally:
@@ -87,18 +135,22 @@ def _ecrire_memoire(memoire: dict) -> None:
 # CHARGER LA MÉMOIRE
 # ─────────────────────────────────────────────────────────────────────────────
 
-def charger_memoire() -> dict:
+def charger_memoire(
+    memory_file: str | Path | None = None,
+    dataset_id: str | None = None,
+) -> dict:
     """
     Charge long_term_memory.json.
     - Fichier absent      → structure vide propre (pas d'erreur)
     - Fichier corrompu    → structure vide propre + avertissement (pas de crash)
     - Toutes les clés sont garanties présentes grâce aux setdefault().
     """
-    if not MEMORY_FILE.exists():
+    target_file = _resolve_memory_file(memory_file, dataset_id)
+    if not target_file.exists():
         return _structure_vide()
 
     try:
-        with open(MEMORY_FILE, "r", encoding="utf-8", errors="replace") as f:
+        with open(target_file, "r", encoding="utf-8", errors="replace") as f:
             data = json.load(f)
     except (json.JSONDecodeError, ValueError, OSError) as e:
         print(f"[MEMOIRE]   Fichier corrompu ({e}) → mémoire réinitialisée proprement")
@@ -115,12 +167,17 @@ def charger_memoire() -> dict:
 # SAUVEGARDER LA MÉMOIRE
 # ─────────────────────────────────────────────────────────────────────────────
 
-def sauvegarder_memoire(data: dict) -> None:
+def sauvegarder_memoire(
+    data: dict,
+    memory_file: str | Path | None = None,
+    dataset_id: str | None = None,
+) -> None:
     """
     Fusionne `data` dans long_term_memory.json de façon incrémentale + atomique.
     Ne remplace jamais tout le fichier — ajoute / fusionne uniquement.
     """
-    memoire = charger_memoire()
+    target_file = _resolve_memory_file(memory_file, dataset_id)
+    memoire = charger_memoire(memory_file=target_file)
 
     # ── 1. Nouvelle session ───────────────────────────────────────────────────
     memoire["sessions"].append({
@@ -169,7 +226,7 @@ def sauvegarder_memoire(data: dict) -> None:
         memoire["dynamic_kb"][attack_type] = bucket[-50:]
 
     # ── Écriture atomique ─────────────────────────────────────────────────────
-    _ecrire_memoire(memoire)
+    _ecrire_memoire(memoire, memory_file=target_file)
 
     print(
         f"[MEMOIRE]  Sauvegarde : {len(memoire['sessions'])} sessions | "
@@ -184,8 +241,8 @@ def sauvegarder_memoire(data: dict) -> None:
 # CONTEXTE HISTORIQUE (résumé compact pour les agents LLM)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_contexte_historique() -> str:
-    memoire = charger_memoire()
+def get_contexte_historique(dataset_id: str | None = None) -> str:
+    memoire = charger_memoire(dataset_id=dataset_id)
     if not memoire["sessions"]:
         return "Aucun historique disponible."
 
@@ -222,14 +279,14 @@ def get_contexte_historique() -> str:
 # HELPERS APPRENTISSAGE CORRECTEUR
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_success_rate(anomaly_type: str) -> float:
+def get_success_rate(anomaly_type: str, dataset_id: str | None = None) -> float:
     """
     Taux de succès (APPROVE / total) pour un type d'anomalie.
     Utilisé par le mode AUTO pour décider d'agir sans validation humaine.
     Retourne 0.0 si aucun historique.
     """
     try:
-        memoire  = charger_memoire()
+        memoire  = charger_memoire(dataset_id=dataset_id)
         stats    = memoire.get("action_stats", {}).get(anomaly_type, {})
         approved = stats.get("approved", 0)
         total    = approved + stats.get("rejected", 0) + stats.get("modified", 0)
@@ -241,7 +298,11 @@ def get_success_rate(anomaly_type: str) -> float:
         return 0.0
 
 
-def enregistrer_stat_action(anomaly_type: str, decision: str) -> None:
+def enregistrer_stat_action(
+    anomaly_type: str,
+    decision: str,
+    dataset_id: str | None = None,
+) -> None:
     """
     Incrémente le compteur pour un type d'anomalie.
     decision : 'approved' | 'rejected' | 'modified'
@@ -252,14 +313,14 @@ def enregistrer_stat_action(anomaly_type: str, decision: str) -> None:
         print(f"[WARN] enregistrer_stat_action: décision inconnue '{decision}'")
         return
     try:
-        memoire = charger_memoire()
+        memoire = charger_memoire(dataset_id=dataset_id)
         entry   = memoire["action_stats"].setdefault(
             anomaly_type, {"approved": 0, "rejected": 0, "modified": 0}
         )
         entry[decision] += 1
         total = sum(entry.values())
         print(f"[STAT] {anomaly_type} → {decision} enregistré (total cumulé : {total})")
-        _ecrire_memoire(memoire)
+        _ecrire_memoire(memoire, dataset_id=dataset_id)
     except Exception as e:
         print(f"[WARN] enregistrer_stat_action: {e}")
 
@@ -268,7 +329,12 @@ def enregistrer_stat_action(anomaly_type: str, decision: str) -> None:
 # KNOWLEDGE BASE DYNAMIQUE — ÉTAPE 4
 # ─────────────────────────────────────────────────────────────────────────────
 
-def update_knowledge_base(type_attack: str, action: str, success: bool) -> None:
+def update_knowledge_base(
+    type_attack: str,
+    action: str,
+    success: bool,
+    dataset_id: str | None = None,
+) -> None:
     """
     Enregistre si une action a bien fonctionné contre un type d'attaque.
     Appelé après chaque validation admin :
@@ -276,7 +342,7 @@ def update_knowledge_base(type_attack: str, action: str, success: bool) -> None:
       REJECT  → success=False (faux positif)
     """
     try:
-        memoire = charger_memoire()
+        memoire = charger_memoire(dataset_id=dataset_id)
         bucket  = memoire["dynamic_kb"].setdefault(type_attack, [])
         bucket.append({
             "action":  action,
@@ -284,20 +350,20 @@ def update_knowledge_base(type_attack: str, action: str, success: bool) -> None:
             "date":    datetime.now().isoformat(),
         })
         memoire["dynamic_kb"][type_attack] = bucket[-50:]
-        _ecrire_memoire(memoire)
+        _ecrire_memoire(memoire, dataset_id=dataset_id)
         print(f"[KB] {type_attack} → {action} ({'✅' if success else '❌'})")
     except Exception as e:
         print(f"[WARN] update_knowledge_base: {e}")
 
 
-def get_best_action(type_attack: str) -> str | None:
+def get_best_action(type_attack: str, dataset_id: str | None = None) -> str | None:
     """
     Retourne la meilleure action connue pour ce type d'attaque.
     Calcule un score = succès / total pour chaque action (plus fiable qu'un simple comptage).
     Retourne None si pas encore d'historique ou aucun succès.
     """
     try:
-        memoire = charger_memoire()
+        memoire = charger_memoire(dataset_id=dataset_id)
         entries = memoire.get("dynamic_kb", {}).get(type_attack, [])
 
         if not entries:
@@ -340,7 +406,7 @@ def get_best_action(type_attack: str) -> str | None:
 # A.4 — ANALYSE DE STABILITÉ INTER-SESSIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def compute_session_stability(n_sessions: int = 3) -> dict:
+def compute_session_stability(n_sessions: int = 3, dataset_id: str | None = None) -> dict:
     """
     A.4 — Compare les N dernières sessions pour détecter si le système
     se comporte de façon cohérente. Alimente le trust score en Phase B.
@@ -364,7 +430,7 @@ def compute_session_stability(n_sessions: int = 3) -> dict:
         "summary":        str,
     }
     """
-    memoire  = charger_memoire()
+    memoire  = charger_memoire(dataset_id=dataset_id)
     sessions = memoire.get("sessions", [])
 
     empty = {
@@ -578,11 +644,11 @@ def restore_threshold(version_id: str | None = None) -> dict:
 # BACKTEST HISTORY — LAYER 5
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_backtest_history() -> list[dict]:
+def get_backtest_history(dataset_id: str | None = None) -> list[dict]:
     """
     Retourne les 20 derniers résultats de backtest depuis long_term_memory.json.
     Utilisé par dashboard_api.py pour afficher la courbe de précision historique.
     Chaque entrée : timestamp, sessions_tested, overall_accuracy, overall_label, summary
     """
-    memory = charger_memoire()
+    memory = charger_memoire(dataset_id=dataset_id)
     return list(reversed(memory.get("backtest_history", [])))

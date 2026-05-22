@@ -83,7 +83,30 @@ pip install -r requirements.txt
 # Lancer le backend
 
 ```bash
-uvicorn app.main:app --reload
+uvicorn app.services.auth_service:app --reload
+```
+
+## Redis + Celery worker
+
+Infrastructure only: the existing business logic stays in place, and the worker currently wraps the existing pipeline entrypoint as an example async task.
+
+Run locally:
+
+```bash
+set REDIS_URL=redis://localhost:6379/0
+celery -A app.workers.celery_app.celery_app worker --pool=solo --loglevel=INFO --queues=pipeline,chat,default --concurrency=1
+```
+
+Notes:
+- Local development defaults to `redis://localhost:6379/0`.
+- Docker still uses `redis://redis:6379/0` through `docker-compose.yml`.
+- On native Windows, use `--pool=solo` to avoid Celery `WinError 5` process-pool failures.
+- If Redis is unavailable, set `TASK_QUEUE_ENABLED=false` and the API will fall back to in-process execution where supported.
+
+Run with Docker Compose:
+
+```bash
+docker compose -f backend/docker-compose.yml up --build
 ```
 
 ---

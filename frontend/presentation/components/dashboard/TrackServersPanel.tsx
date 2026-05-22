@@ -76,6 +76,7 @@ interface Props {
   alarms:          AlarmItem[];
   loading:         boolean;
   wsConnected:     boolean;
+  isFusionView:    boolean;
   onServersChange: (servers: string[]) => void;
 }
 
@@ -99,10 +100,10 @@ const SevBadge: FC<{ sev: string }> = ({ sev }) => {
 // ── Composant principal ───────────────────────────────────────────────────────
 
 export const TrackServersPanel: FC<Props> = ({
-  kpis, alarms, loading, wsConnected, onServersChange,
+  kpis, alarms, loading, wsConnected, isFusionView, onServersChange,
 }) => {
   // ✅ raw servers from backend
-  const { servers, serverLabels, isEmpty, loading: serversLoading, error } = useServers();
+  const { servers, loading: serversLoading } = useServers();
 
   // Merge with known servers so all four always appear
   const mergedServers: ServerInfo[] = useMemo(() => {
@@ -230,6 +231,36 @@ export const TrackServersPanel: FC<Props> = ({
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: 4 }}>
+      {isFusionView && (
+        <div style={{
+          padding: "14px 16px",
+          borderRadius: 12,
+          border: "1px solid rgba(56,189,248,0.28)",
+          background: "linear-gradient(135deg, rgba(8,47,73,0.5), rgba(15,23,42,0.82))",
+          color: "#dbeafe",
+        }}>
+          <div style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 8,
+            padding: "4px 10px",
+            borderRadius: 999,
+            background: "rgba(125,211,252,0.14)",
+            border: "1px solid rgba(125,211,252,0.22)",
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+            fontSize: 10,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>
+            FUSION TRACK · ANALYSIS ONLY
+          </div>
+          <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+            This view correlates and ranks signals across datasets. It never blocks IPs, modifies thresholds,
+            retrains models, or triggers corrective execution.
+          </div>
+        </div>
+      )}
 
       {/* ── Cartes serveurs ── */}
       {serversLoading ? (
@@ -440,7 +471,7 @@ export const TrackServersPanel: FC<Props> = ({
           flexWrap: "wrap", gap: 8,
         }}>
           <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>
-            Table dynamique — Alarmes réelles
+            {isFusionView ? "Table dynamique — Signaux fusion" : "Table dynamique — Alarmes réelles"}
             <span style={{
               marginLeft: 8, fontSize: 10, padding: "1px 7px", borderRadius: 20,
               background: filtered.length > 0 ? "rgba(226,75,74,0.12)" : "rgba(29,158,117,0.1)",
@@ -495,11 +526,12 @@ export const TrackServersPanel: FC<Props> = ({
                 <tr style={{ background: "var(--color-background-secondary, #f3f4f6)" }}>
                   {([
                     ["timestamp", "Timestamp"],
+                    ...(isFusionView ? [["dataset_id", "Dataset"]] as [keyof AlarmItem, string][] : []),
                     ["source_ip", "IP Source"],
                     ["engine",    "Engine"],
                     ["severity",  "Sévérité"],
                     ["score",     "Score"],
-                    ["action",    "Action"],
+                    ...(!isFusionView ? [["action", "Action"]] as [keyof AlarmItem, string][] : []),
                     ["type",      "Type"],
                     ["failures",  "Failures"],
                     ["message",   "Message"],
@@ -530,6 +562,11 @@ export const TrackServersPanel: FC<Props> = ({
                     style={{ background: i % 2 === 0 ? "transparent" : "var(--color-background-secondary, #f3f4f6)" }}
                   >
                     <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 10, whiteSpace: "nowrap", color: "var(--muted, #6b7280)" }}>{row.timestamp}</td>
+                    {isFusionView && (
+                      <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 10, whiteSpace: "nowrap", color: "#0C447C" }}>
+                        {row.dataset_id ?? "fusion"}
+                      </td>
+                    )}
                     <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 10, whiteSpace: "nowrap", color: "var(--text)" }}>{row.source_ip}</td>
                     <td style={{ padding: "6px 10px" }}>
                       <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text)" }}>{row.engine}</span>
@@ -538,9 +575,11 @@ export const TrackServersPanel: FC<Props> = ({
                     <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 11, fontWeight: 600, textAlign: "right", color: (row.score ?? 0) > 70 ? "#E24B4A" : "var(--text)" }}>
                       {row.score?.toFixed(1) ?? "—"}
                     </td>
-                    <td style={{ padding: "6px 10px" }}>
-                      <span style={{ fontSize: 10, fontWeight: 600, fontFamily: "monospace", color: ACTION_COLOR[row.action] ?? "var(--text)" }}>{row.action ?? "—"}</span>
-                    </td>
+                    {!isFusionView && (
+                      <td style={{ padding: "6px 10px" }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, fontFamily: "monospace", color: ACTION_COLOR[row.action] ?? "var(--text)" }}>{row.action ?? "—"}</span>
+                      </td>
+                    )}
                     <td style={{ padding: "6px 10px", color: "var(--text)", fontSize: 10, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.type ?? "—"}</td>
                     <td style={{ padding: "6px 10px", textAlign: "right", fontFamily: "monospace", color: (row.failures ?? 0) > 50 ? "#E24B4A" : "var(--text)" }}>{row.failures ?? 0}</td>
                     <td style={{ padding: "6px 10px", color: "var(--muted, #6b7280)", fontSize: 10, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.message}>
@@ -560,7 +599,11 @@ export const TrackServersPanel: FC<Props> = ({
             fontSize: 10, color: "var(--muted, #6b7280)",
           }}>
             <span>{filtered.length} ligne{filtered.length !== 1 ? "s" : ""} affichée{filtered.length !== 1 ? "s" : ""}</span>
-            <span>timestamp · IP_Source · engine · severity · score · action · type · failures · message</span>
+            <span>
+              {isFusionView
+                ? "timestamp · dataset · IP_Source · engine · severity · score · type · failures · message"
+                : "timestamp · IP_Source · engine · severity · score · action · type · failures · message"}
+            </span>
           </div>
         )}
       </div>

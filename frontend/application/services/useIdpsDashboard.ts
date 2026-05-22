@@ -18,6 +18,10 @@ import { isActivityHistoryMsg, isActivityMsg, isHistoryMsg } from "../../shared/
 const API     = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_URL  = import.meta.env.VITE_WS_URL  || "ws://localhost:8000/ws/logs";
 const POLL_MS = 10_000;
+const FUSION_DATASET_IDS = new Set(["fusion", "__fusion__", "merged", "__merged__"]);
+
+const isFusionDataset = (dataset?: string): boolean =>
+  FUSION_DATASET_IDS.has(String(dataset ?? "").trim().toLowerCase());
 
 // ─── Normalisation d'une alarme brute (backend → AlarmItem) ──────────────────
 const normalizeAlarm = (a: any): AlarmItem => ({
@@ -78,6 +82,9 @@ const normalizeAlarm = (a: any): AlarmItem => ({
   server_id:
     a.server_id,
 
+  dataset_id:
+    a.dataset_id,
+
   stage:
     a.stage,
 });
@@ -95,12 +102,28 @@ const sortByTs = (arr: AlarmItem[]): AlarmItem[] =>
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 
+const sortSuggestions = (arr: CorrectiveSuggestion[]): CorrectiveSuggestion[] =>
+  arr.slice().sort((a, b) =>
+    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+const mergeSuggestions = (...groups: CorrectiveSuggestion[][]): CorrectiveSuggestion[] => {
+  const map = new Map<string, CorrectiveSuggestion>();
+  for (const group of groups) {
+    for (const suggestion of group) {
+      map.set(suggestion.suggestion_id, suggestion);
+    }
+  }
+  return sortSuggestions(Array.from(map.values())).slice(0, 200);
+};
+
 const normalizeActivity = (activity: any): WorkflowActivity => ({
   id:
     activity?.id ??
     `${activity?.event_type ?? activity?.stage ?? "activity"}-${activity?.timestamp ?? Date.now()}`,
   timestamp: activity?.timestamp ?? new Date().toISOString(),
   session_id: activity?.session_id,
+  dataset_id: activity?.dataset_id,
   event_type: activity?.event_type,
   stage: activity?.stage ?? "session",
   actor: activity?.actor ?? "System",
@@ -130,6 +153,12 @@ const sortActivities = (arr: WorkflowActivity[]): WorkflowActivity[] =>
   arr.slice().sort((a, b) =>
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
+
+const matchesSuggestionDataset = (suggestion: CorrectiveSuggestion, dataset: string): boolean => {
+  if (!dataset) return true;
+  const suggestionDataset = String(suggestion.dataset_id ?? "").trim().toLowerCase();
+  return suggestionDataset === dataset.trim().toLowerCase();
+};
 
 const mapLegacyEventToActivity = (event: Record<string, any>): WorkflowActivity | null => {
   const timestamp = String(event.timestamp ?? new Date().toISOString());
@@ -281,11 +310,12 @@ const extractActivitiesFromEvents = (events: Record<string, unknown>[]): Workflo
 };
 
 // ─── Helper fetch authentifié ─────────────────────────────────────────────────
-async function get<T>(path: string, servers: string[] = []): Promise<T> {
-  const params = servers.length > 0
-    ? "?" + servers.map(s => `servers=${encodeURIComponent(s)}`).join("&")
-    : "";
-  const res = await fetch(`${API}${path}${params}`, {
+async function get<T>(path: string, dataset = "", servers: string[] = []): Promise<T> {
+  const params = new URLSearchParams();
+  if (dataset) params.set("dataset", dataset);
+  for (const server of servers) params.append("servers", server);
+  const query = params.toString();
+  const res = await fetch(`${API}${path}${query ? `?${query}` : ""}`, {
     headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
   });
   if (!res.ok) throw new Error(`${res.status} ${path}`);
@@ -334,23 +364,22 @@ const EMPTY: IdpsDashboardState = {
 };
 
 // ─── Hook principal ───────────────────────────────────────────────────────────
-export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardState => {
+export const useIdpsDashboard = (selectedDataset = ""): IdpsDashboardState => {
   const [state, setState]  = useState<IdpsDashboardState>(EMPTY);
   const wsRef              = useRef<WebSocket | null>(null);
   const isFirstLoad        = useRef(true);
   const filterVersion      = useRef(0);
   const logBuffer          = useRef<string[]>([]);
 
-  const serversKey = selectedServers.slice().sort().join(",");
+  const datasetKey = selectedDataset;
 
-  // ── Refs to ensure polling always uses the latest selected servers ──────
-  const serversRef = useRef(selectedServers);
-  useEffect(() => { serversRef.current = selectedServers; }, [selectedServers]);
+  const datasetRef = useRef(selectedDataset);
+  useEffect(() => { datasetRef.current = selectedDataset; }, [selectedDataset]);
 
-  // ── REST fetch (uses serversRef for current server list) ────────────────
   const refresh = useCallback(async () => {
     try {
-      const servers = serversRef.current;   // 👈 always fresh
+      const dataset = datasetRef.current;
+      const fusionView = isFusionDataset(dataset);
       const health = await get<HealthCheck>("/health");
       if (health.status !== "ok") {
         setState(s => ({ ...s, loading: false, apiReady: false }));
@@ -359,17 +388,19 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
 
       const [kpis, alarms, engines, decisions, live, suggestions, sessions, pipeline, trust] =
         await Promise.allSettled([
-          get<KpiData>("/api/kpis",              servers),
-          get<AlarmItem[]>("/api/alarms",        servers),
-          get<EngineScore[]>("/api/engine-scores", servers),
-          get<AgentDecision[]>("/api/decisions"),
-          get<LiveAlarmsResponse>("/api/alarms/live"),
-          get<{ count: number; suggestions: CorrectiveSuggestion[] }>(
-            "/api/corrective/suggestions?status=PENDING"
-          ),
-          get<SessionSummary[]>("/api/sessions"),
-          get<PipelineLatest>("/api/pipeline/latest"),
-          get<TrustData>("/api/trust"),
+          get<KpiData>("/api/kpis", dataset),
+          get<AlarmItem[]>("/api/alarms", dataset),
+          get<EngineScore[]>("/api/engine-scores", dataset),
+          get<AgentDecision[]>("/api/decisions", dataset),
+          get<LiveAlarmsResponse>("/api/alarms/live", fusionView ? "" : dataset),
+          fusionView
+            ? Promise.resolve({ count: 0, suggestions: [] })
+            : get<{ count: number; suggestions: CorrectiveSuggestion[] }>(
+                `/api/corrective/suggestions${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ""}`
+              ),
+          get<SessionSummary[]>("/api/sessions", dataset),
+          get<PipelineLatest>("/api/pipeline/latest", dataset),
+          get<TrustData>("/api/trust", dataset),
         ]);
 
       const kpisVal        = kpis.status        === "fulfilled" ? kpis.value                    : null;
@@ -419,14 +450,9 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
           return sortByTs(Array.from(map.values())).slice(0, 100);
         })();
 
-        localStorage.setItem("alarms_sync", JSON.stringify(mergedAlarms));
+        localStorage.setItem(`alarms_sync:${datasetRef.current || "default"}`, JSON.stringify(mergedAlarms));
 
-        const mergedSuggestions = (() => {
-          const map = new Map<string, CorrectiveSuggestion>();
-          for (const s of suggestionsVal)   map.set(s.suggestion_id, s);
-          for (const s of prev.suggestions) map.set(s.suggestion_id, s);
-          return Array.from(map.values()).slice(0, 50);
-        })();
+        const mergedSuggestions = mergeSuggestions(prev.suggestions, suggestionsVal);
 
         const normalizedKpis: KpiData | null = kpisVal
           ? {
@@ -553,8 +579,9 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
         refreshRef.current();
         // send current filter using the ref to avoid stale data
         ws.send(JSON.stringify({
-          type:    "filter",
-          servers: serversRef.current,
+          type: "filter",
+          servers: [],
+          dataset: isFusionDataset(datasetRef.current) ? "" : datasetRef.current,
           version: filterVersion.current,
         }));
       };
@@ -564,7 +591,13 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
           const data = JSON.parse(event.data as string) as WsIncomingMessage;
 
           if (data.type === "filter_ack") {
-            setState(prev => ({ ...prev, logLines: [] }));
+            setState(prev => ({
+              ...prev,
+              alarms: [],
+              activities: [],
+              logLines: [],
+              suggestions: [],
+            }));
             return;
           }
 
@@ -627,14 +660,13 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
               type: "suggestion";
               suggestion: CorrectiveSuggestion;
             }).suggestion;
+            const activeDataset = String(datasetRef.current ?? "");
+            if (!activeDataset || isFusionDataset(activeDataset) || !matchesSuggestionDataset(incoming, activeDataset)) {
+              return;
+            }
             setState(prev => ({
               ...prev,
-              suggestions: [
-                incoming,
-                ...prev.suggestions.filter(
-                  s => s.suggestion_id !== incoming.suggestion_id
-                ),
-              ].slice(0, 50),
+              suggestions: mergeSuggestions(prev.suggestions, [incoming]),
             }));
             return;
           }
@@ -688,23 +720,26 @@ export const useIdpsDashboard = (selectedServers: string[] = []): IdpsDashboardS
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── WebSocket filter update when servers change ───────────────────────
+  // ── WebSocket filter update when dataset changes ──────────────────────
   useEffect(() => {
     filterVersion.current += 1;
     const version = filterVersion.current;
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
-        type:    "filter",
-        servers: serversRef.current,       // ✅ use ref here as well
+        type: "filter",
+        servers: [],
+        dataset: isFusionDataset(datasetRef.current) ? "" : datasetRef.current,
         version,
       }));
     }
-  }, [serversKey]);
+    setState(prev => ({ ...prev, loading: true, alarms: [], activities: [], logLines: [] }));
+    refreshRef.current();
+  }, [datasetKey]);
 
   // ── Sync multi-tabs via localStorage ─────────────────────────────────
   useEffect(() => {
     const handler = (e: StorageEvent) => {
-      if (e.key === "alarms_sync" && e.newValue) {
+      if (e.key === `alarms_sync:${datasetRef.current || "default"}` && e.newValue) {
         try {
           const parsed: AlarmItem[] = JSON.parse(e.newValue);
           setState(prev => ({

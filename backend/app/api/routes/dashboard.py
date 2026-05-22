@@ -180,7 +180,7 @@ def api_servers(
     if not raw_ids:
         try:
             events = _latest_jsonl()
-            from dashboard_routes import _get_event
+            from app.api.routes.dashboard_routes import _get_event
             pipeline_start = _get_event(events, "PIPELINE_START") or {}
             sources = pipeline_start.get("data_sources", [])
             if isinstance(sources, list) and sources:
@@ -303,7 +303,7 @@ def api_kpis(
             base["blocked_ips"]  = None
 
         active_engines_in_data = set()
-        from dashboard_routes import _get_event
+        from app.api.routes.dashboard_routes import _get_event
         pass1  = _get_event(events, "PASS1_COMPLETE")
         by_dom = pass1.get("alarms_by_domain", {})
         for eng in engines:
@@ -422,7 +422,7 @@ def api_engine_scores(
 @router.get("/sessions")
 def api_sessions() -> list:
     def load():
-        from dashboard_routes import _as_float_or_none
+        from app.api.routes.dashboard_routes import _as_float_or_none
         mem  = _load_memory()
         sess = mem.get("sessions", [])
         result = []

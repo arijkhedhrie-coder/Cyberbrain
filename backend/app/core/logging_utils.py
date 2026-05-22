@@ -35,6 +35,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from app.core.event_store import append_event
 
 try:
     from app.core.websocket_broadcast import broadcast_activity as _broadcast_activity
@@ -134,6 +135,7 @@ def _dashboard_activity(record: dict[str, Any]) -> dict[str, Any] | None:
     event_type = str(record.get("event_type", ""))
     timestamp = str(record.get("timestamp", ""))
     session_id = str(record.get("session_id", ""))
+    dataset_id = str(record.get("dataset_id", ""))
 
     def activity(
         *,
@@ -150,6 +152,7 @@ def _dashboard_activity(record: dict[str, Any]) -> dict[str, Any] | None:
             "id": _activity_id(record),
             "timestamp": timestamp,
             "session_id": session_id,
+            "dataset_id": dataset_id,
             "event_type": event_type,
             "stage": stage,
             "actor": actor,
@@ -467,11 +470,16 @@ class SessionLogger:
     EV_WARNING               = "WARNING"
     EV_ERROR                 = "ERROR"
 
-    def __init__(self, output_dir: str | os.PathLike[str] | None = None):
+    def __init__(
+        self,
+        output_dir: str | os.PathLike[str] | None = None,
+        dataset_id: str | None = None,
+    ):
         resolved_output_dir = _resolve_output_dir(output_dir)
         os.makedirs(resolved_output_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.session_id   = ts
+        self.dataset_id   = dataset_id
         self.output_path  = str(resolved_output_dir / f"session_{ts}.jsonl")
         self._file        = open(self.output_path, "a", encoding="utf-8")
         self._session_start = datetime.now(timezone.utc)
@@ -489,6 +497,7 @@ class SessionLogger:
         record = {
             "timestamp":  _now_iso(),
             "session_id": self.session_id,
+            "dataset_id": self.dataset_id,
             "event_type": event_type,
             **{k: _safe(v) for k, v in payload.items()},
         }
@@ -748,6 +757,17 @@ class SessionLogger:
             "confidence_label":      label,
             "signals_summary":       trust.get("signals_summary"),
         })
+        try:
+            append_event(
+                category="trust",
+                event_type=self.EV_TRUST_COMPUTED,
+                payload=dict(trust),
+                dataset_id=str(trust.get("dataset_id") or self.dataset_id or ""),
+                source="session_logger",
+                tags=["trust", "analytics"],
+            )
+        except Exception:
+            pass
 
     def warning(self, source: str, message: str) -> None:
         _safe_console_print(f"[WARN:{source}] {message}")

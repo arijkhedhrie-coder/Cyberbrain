@@ -9,8 +9,6 @@
 
 import { useEffect, useState, useRef } from "react";
 import {
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -31,11 +29,13 @@ interface MinPoint {
   risque: number;
 }
 
-interface MinimizationResponse {
-  series: MinPoint[];
-  source: "realtime" | "memory";
-  count: number;
+interface MinimizationEnvelope {
+  series?: MinPoint[];
+  source?: "realtime" | "memory";
+  count?: number;
 }
+
+type MinimizationResponse = MinimizationEnvelope | MinPoint[];
 
 // ── Mock : variation réelle simulée ─────────────────────────────────────────
 // Simule l'effet de notre solution : pic d'alarmes au début → tendance ↓
@@ -94,7 +94,40 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 const FLASK_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-const MinimizationChart = () => {
+const isMinPoint = (value: unknown): value is MinPoint => {
+  if (!value || typeof value !== "object") return false;
+  const point = value as Record<string, unknown>;
+  return (
+    typeof point.timestamp === "string" &&
+    typeof point.alarmes === "number" &&
+    typeof point.risque === "number"
+  );
+};
+
+const normalizeMinimizationResponse = (
+  data: MinimizationResponse,
+): { series: MinPoint[]; source: "realtime" | "memory" } | null => {
+  if (Array.isArray(data)) {
+    const series = data.filter(isMinPoint);
+    return series.length > 0 ? { series, source: "memory" } : null;
+  }
+
+  const series = Array.isArray(data.series) ? data.series.filter(isMinPoint) : [];
+  if (series.length === 0) {
+    return null;
+  }
+
+  return {
+    series,
+    source: data.source ?? "memory",
+  };
+};
+
+interface Props {
+  dataset?: string;
+}
+
+const MinimizationChart = ({ dataset = "" }: Props) => {
   const [series, setSeries]     = useState<MinPoint[]>([]);
   const [source, setSource]     = useState<"realtime" | "memory" | "mock">("mock");
   const [loading, setLoading]   = useState(true);
@@ -103,14 +136,16 @@ const MinimizationChart = () => {
 
   const fetchData = async () => {
     try {
+      const query = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
       const res = await axios.get<MinimizationResponse>(
-        `${FLASK_BASE}/api/minimization`,
+        `${FLASK_BASE}/api/minimization${query}`,
         { timeout: 3000 }
       );
+      const normalized = normalizeMinimizationResponse(res.data);
 
-      if (res.data.series && res.data.series.length > 0) {
-        setSeries(res.data.series);
-        setSource(res.data.source);
+      if (normalized) {
+        setSeries(normalized.series);
+        setSource(normalized.source);
         setError(null);
       } else {
         // Endpoint OK mais aucune session encore
@@ -134,7 +169,7 @@ const MinimizationChart = () => {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, []);
+  }, [dataset]);
 
   // ── Calcul de la tendance globale ──────────────────────────────────────────
   const trend = (() => {

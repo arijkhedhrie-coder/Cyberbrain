@@ -12,6 +12,7 @@ import os, json, joblib
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from contextvars import ContextVar
 from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.svm import OneClassSVM
@@ -67,6 +68,12 @@ NIVEAUX = [
 ]
 
 
+_THRESHOLD_OVERRIDES: ContextVar[dict[str, float] | None] = ContextVar(
+    "anomaly_threshold_overrides",
+    default=None,
+)
+
+
 def _get_features(df):
     known = [f for f in [*FEATURES, *EXTRA_FEATURES] if f in df.columns]
     if known:
@@ -87,10 +94,17 @@ def _niveau(score):
 
 # ══ COUCHE 1 ══════════════════════════════
 def _charger_seuils_adaptatifs():
+    overrides = _THRESHOLD_OVERRIDES.get() or {}
     if os.path.exists(SEUILS_PATH):
         with open(SEUILS_PATH) as f:
-            return json.load(f)
-    return SEUILS_DEFAUT.copy()
+            seuils = json.load(f)
+            if overrides:
+                seuils.update(overrides)
+            return seuils
+    seuils = SEUILS_DEFAUT.copy()
+    if overrides:
+        seuils.update(overrides)
+    return seuils
 
 
 def _mettre_a_jour_seuils(df, features):
@@ -466,10 +480,10 @@ def detecter_anomalies(df, dynamic_config=None):
     print("\n" + "="*55)
     print("  DÉTECTION AVANCÉE — 5 COUCHES")
     print("="*55)
+    override_token = None
 
     # Appliquer les overrides de l'orchestrateur si présents
     if dynamic_config is not None and not dynamic_config.is_default():
-        seuils_courants = _charger_seuils_adaptatifs()
 
         # Compat: `DynamicConfig` (src/hybrid_config.py) n'expose pas `threshold_overrides`.
         # On mappe donc les seuils "métier" (SSH/WEB/...) vers les seuils utilisés par ce module
@@ -506,10 +520,7 @@ def detecter_anomalies(df, dynamic_config=None):
             overrides["Nombre_Erreurs"] = float(err_proxy)
 
         if overrides:
-            seuils_courants.update(overrides)
-            os.makedirs(MODEL_DIR, exist_ok=True)
-            with open(SEUILS_PATH, "w") as f:
-                json.dump(seuils_courants, f, indent=2)
+            override_token = _THRESHOLD_OVERRIDES.set(overrides)
             print(f"[DynamicConfig] Seuils ajustés : {overrides}")
 
     if_model, lof_model, svm_model, scaler = charger_ou_entrainer(df)
@@ -636,6 +647,8 @@ def detecter_anomalies(df, dynamic_config=None):
         _sauvegarder_blacklist(ips_critiques)
 
     print("="*55)
+    if override_token is not None:
+        _THRESHOLD_OVERRIDES.reset(override_token)
     return df, df_anomalies, alarmes, []
 
 

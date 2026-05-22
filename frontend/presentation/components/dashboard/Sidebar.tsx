@@ -20,7 +20,7 @@ interface PredictionSummary {
   prevention_suggestions: string[];
 }
 
-type Section = "dashboard" | "track" | "corrective" | "forecast";
+type Section = "dashboard" | "corrective" | "forecast" | "fusion";
 
 interface Props {
   activeSection:    Section;
@@ -39,16 +39,6 @@ const IconDashboard = ({ active }: { active: boolean }) => (
   </svg>
 );
 
-const IconGrid = ({ active }: { active: boolean }) => (
-  <svg viewBox="0 0 14 14" width={13} height={13} fill="none"
-    stroke={active ? "#a78bfa" : "currentColor"} strokeWidth="1.5" strokeLinecap="round">
-    <rect x="1" y="1" width="5" height="5" rx="1.5"/>
-    <rect x="8" y="1" width="5" height="5" rx="1.5"/>
-    <rect x="1" y="8" width="5" height="5" rx="1.5"/>
-    <rect x="8" y="8" width="5" height="5" rx="1.5"/>
-  </svg>
-);
-
 const IconCorrective = ({ active }: { active: boolean }) => (
   <svg viewBox="0 0 14 14" width={13} height={13} fill="none"
     stroke={active ? "#a78bfa" : "currentColor"} strokeWidth="1.5" strokeLinecap="round">
@@ -61,6 +51,14 @@ const IconStar = () => (
   <svg viewBox="0 0 14 14" width={13} height={13} fill="none"
     stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
     <path d="M7 1l1.5 3 3.5.5-2.5 2.5.6 3.5L7 9l-3.1 1.5.6-3.5L2 4.5 5.5 4z"/>
+  </svg>
+);
+
+const IconFusion = ({ active }: { active: boolean }) => (
+  <svg viewBox="0 0 14 14" width={13} height={13} fill="none"
+    stroke={active ? "#22d3ee" : "currentColor"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="7" cy="7" r="2.2" />
+    <path d="M7 1.2v1.6M7 11.2v1.6M1.2 7h1.6M11.2 7h1.6M2.7 2.7l1.1 1.1M10.2 10.2l1.1 1.1M10.2 3.8l1.1-1.1M2.7 11.3l1.1-1.1" />
   </svg>
 );
 
@@ -149,15 +147,6 @@ export const Sidebar: FC<Props> = ({
           icon={<IconDashboard active={activeSection === "dashboard"} />}
         />
         <NavBtn
-          label="Track Servers"
-          tooltip="Track Servers"
-          active={activeSection === "track"}
-          onClick={() => onSectionChange("track")}
-          count={3}
-          countVariant="cyan"
-          icon={<IconGrid active={activeSection === "track"} />}
-        />
-        <NavBtn
           label="Agent Correcteur"
           tooltip="Agent Correcteur"
           active={activeSection === "corrective"}
@@ -165,7 +154,7 @@ export const Sidebar: FC<Props> = ({
           countVariant="purple"
           icon={<IconCorrective active={activeSection === "corrective"} />}
         />
-          <NavBtn
+        <NavBtn
           label="Prévision"
           tooltip="Prévision"
           active={activeSection === "forecast"}
@@ -173,6 +162,14 @@ export const Sidebar: FC<Props> = ({
           count={prediction?.available ? `${prediction.prediction_score}%` : undefined}
           countVariant="cyan"
           icon={<IconStar />}   // you can use any icon, e.g. IconStar already exists
+        />
+        <NavBtn
+          label="Fusion"
+          tooltip="Fusion"
+          active={activeSection === "fusion"}
+          onClick={() => onSectionChange("fusion")}
+          countVariant="cyan"
+          icon={<IconFusion active={activeSection === "fusion"} />}
         />
 
         {/* ── System block ── */}

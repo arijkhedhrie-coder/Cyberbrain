@@ -80,9 +80,12 @@ export const EMPTY_DASHBOARD_STATS: DashboardStats = {
 };
 
 // ── Appels API réels (avec fallback sur structures vides) ─────────────────
-export const fetchLiveMetrics = async (): Promise<LiveMetrics> => {
+export const fetchLiveMetrics = async (dataset?: string): Promise<LiveMetrics> => {
   try {
-    const res = await axios.get(`${API_BASE}/live`, { timeout: 2000 });
+    const res = await axios.get(`${API_BASE}/live`, {
+      params: dataset ? { dataset } : undefined,
+      timeout: 2000,
+    });
     return res.data;
   } catch (err) {
     console.error("[fetchLiveMetrics] backend indisponible:", err);
@@ -92,10 +95,12 @@ export const fetchLiveMetrics = async (): Promise<LiveMetrics> => {
 
 export const fetchDashboardStats = async (
   token: string,
+  dataset?: string,
 ): Promise<DashboardStats> => {
   try {
     const res = await axios.get(`${API_BASE}/dashboard/stats`, {
       headers: { Authorization: `Bearer ${token}` },
+      params: dataset ? { dataset } : undefined,
       timeout: 3000,
     });
     return res.data;

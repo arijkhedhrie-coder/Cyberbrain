@@ -4,7 +4,6 @@
 // Source : alarms[] + sessions[] — reconstruction chronologique
 // ────────────────────────────────────────────────────────────────
 import type { AttackTimelinePanelProps } from "../../../shared/types/analyticsProps";
-import type { AlarmItem } from "../../../shared/types/idps";
 
 const PHASE_MAP: Record<string, string> = {
   SSH:         "BRUTE_FORCE",

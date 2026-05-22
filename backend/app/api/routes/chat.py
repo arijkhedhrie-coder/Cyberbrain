@@ -1,63 +1,70 @@
-from fastapi import APIRouter
+from __future__ import annotations
+
+import asyncio
+
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
-import os, json
-from datetime import datetime
+
+from app.services.background_tasks import get_task_dispatcher
+from app.services.chat_runtime import (
+    build_chat_fallback_response,
+    build_chat_prompt,
+    call_llm,
+    get_dashboard_context,
+)
+from app.workers.logging import get_worker_logger
 
 router = APIRouter(prefix="/api", tags=["chat"])
+logger = get_worker_logger(__name__)
 
-# We'll use the same Groq LLM as the agents
-import os
-api_key = os.getenv("GROQ_API_KEY")
-
-def _call_llm(prompt: str) -> str:
-    """Quick Groq call using the same model as your agents."""
-    try:
-        from groq import Groq
-        client = Groq(api_key=api_key)
-        completion = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4,
-            max_tokens=600,
-        )
-        return completion.choices[0].message.content
-    except Exception as e:
-        return f"Erreur LLM : {e}"
-
-def _get_dashboard_context() -> str:
-    """Collect a short summary of the current system state."""
-    try:
-        from dashboard_routes import _load_memory, _latest_jsonl, _get_event
-        events = _latest_jsonl()
-        mem = _load_memory()
-        kpis = _get_event(events, "METRICS_COMPUTED")
-        pass1 = _get_event(events, "PASS1_COMPLETE")
-        health = kpis.get("health_score", "N/A")
-        alerts = pass1.get("alarm_count", 0)
-        pattern = kpis.get("attack_pattern", "unknown")
-        return (
-            f"Santé système : {health}%. "
-            f"Alarmes actives : {alerts}. "
-            f"Pattern d'attaque : {pattern}. "
-            f"(Données du {datetime.now().strftime('%H:%M:%S')})"
-        )
-    except Exception:
-        return "Contexte non disponible."
 
 class ChatRequest(BaseModel):
     message: str
 
+
 @router.post("/chat")
-def chat_endpoint(req: ChatRequest):
-    context = _get_dashboard_context()
-    system_prompt = (
-        "Tu es l'assistant du tableau de bord IDPS (Intrusion Detection & Prevention System). "
-        "Ce système surveille en temps réel des serveurs Linux (SSH, Web, FTP, Kernel) via un pipeline hybride "
-        "multi-agent basé sur CrewAI et des moteurs de détection ML (10+ couches SSH, 5 couches générales, "
-        "détection de chaînes d'attaque, prédiction, agent correcteur semi‑automatique, Trust Gate). "
-        "Réponds de manière concise et utile en français.\n\n"
-        f"Contexte actuel du système :\n{context}"
-    )
-    full_prompt = f"{system_prompt}\n\nUtilisateur : {req.message}\nAssistant :"
-    answer = _call_llm(full_prompt)
-    return {"response": answer}
+async def chat_endpoint(req: ChatRequest, request: Request) -> dict[str, str]:
+    context = get_dashboard_context()
+    prompt = build_chat_prompt(req.message, context)
+    fallback_response = build_chat_fallback_response(context, req.message)
+    dispatcher = get_task_dispatcher(request.app)
+
+    if dispatcher.settings.enabled:
+        try:
+            job = await asyncio.to_thread(
+                dispatcher.enqueue_chat_response,
+                prompt=prompt,
+                context=context,
+                user_message=req.message,
+                fallback_response=fallback_response,
+            )
+            result = await asyncio.to_thread(
+                dispatcher.wait_for_result,
+                job.task_id,
+                timeout=dispatcher.settings.chat_result_timeout_seconds,
+            )
+            if isinstance(result, dict) and result.get("response"):
+                return {"response": str(result["response"])}
+        except TimeoutError:
+            logger.warning("Chat worker timed out; falling back to local execution.")
+            pass
+        except RuntimeError as exc:
+            logger.warning("Chat worker unavailable; falling back to local execution: %s", exc)
+            pass
+        except Exception:
+            logger.exception("Chat worker execution failed; falling back to local execution.")
+            pass
+
+    try:
+        answer = await asyncio.wait_for(
+            asyncio.to_thread(
+                call_llm,
+                prompt,
+                timeout_seconds=dispatcher.settings.chat_local_timeout_seconds,
+            ),
+            timeout=dispatcher.settings.chat_local_timeout_seconds,
+        )
+        return {"response": answer}
+    except Exception:
+        logger.warning("Chat local fallback failed; returning deterministic fallback response.")
+        return {"response": fallback_response}

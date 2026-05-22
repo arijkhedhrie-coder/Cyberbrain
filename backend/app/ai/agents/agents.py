@@ -65,6 +65,11 @@ os.environ.setdefault("CREWAI_EMBEDDING_PROVIDER", "ollama")
 os.environ.setdefault("CREWAI_EMBEDDING_MODEL",    "nomic-embed-text")
 os.environ.setdefault("OLLAMA_BASE_URL",           "http://localhost:11434")
 os.environ.setdefault("OTEL_SDK_DISABLED",         "true")
+os.environ.setdefault("CREWAI_DISABLE_TELEMETRY",  "true")
+os.environ.setdefault("LANGCHAIN_TRACING_V2",      "false")
+os.environ.setdefault("LANGSMITH_TRACING",         "false")
+os.environ.setdefault("OTEL_LOG_LEVEL",            "ERROR")
+os.environ.setdefault("LITELLM_VERBOSE",           "false")
 
 # Patch RAGStorage pour forcer Ollama avant initialisation ChromaDB
 _rag_patch_status, _rag_patch_detail = patch_legacy_rag_storage_for_ollama()
@@ -109,6 +114,11 @@ llm_orchestrator = LLM(
     temperature=0.0,   
     max_tokens=800,
 )
+
+CREW_VERBOSE = os.getenv("CREWAI_VERBOSE", "false").lower() == "true"
+LLM_MIN_DELAY_SECONDS = max(0.0, float(os.getenv("LLM_MIN_DELAY_SECONDS", "3.0")))
+LLM_RATE_LIMIT_BACKOFF_SECONDS = max(1.0, float(os.getenv("LLM_RATE_LIMIT_BACKOFF_SECONDS", "6.0")))
+_LAST_LLM_CALL = [0.0]
 
 # ── FLAG ANTI-BOUCLE [B3] : empêche declencher_alarme d'être appelé plusieurs fois ──
 _alarme_declenchee_ce_cycle = False
@@ -440,29 +450,45 @@ def _build_action(type_upper: str, ip: str, severite: str, anomalie: dict) -> di
         }
 
 
+def _is_auto_eligible_action(action: dict) -> bool:
+    return str(action.get("type") or "").upper() in {
+        "BLOCAGE_IP_AWS_SECGROUP",
+        "BAN_FAIL2BAN",
+        "BLACKLIST_IP",
+        "ALERTE_SYSTEME",
+        "LIBERER_MEMOIRE",
+        "DESACTIVER_COMPTE",
+    }
+
+
 from crewai import LLM
 
 _original_llm_call = LLM.call
 
 def _throttled_llm_call(self, *args, **kwargs):
-    _last_llm_call = [0.0]
-    elapsed = time.time() - _last_llm_call[0]
-    from app.core.config.config import MIN_DELAY_SECONDS as _MIN_DELAY_SECONDS
-    if elapsed < _MIN_DELAY_SECONDS:
-        wait = _MIN_DELAY_SECONDS - elapsed
-        print(f"[THROTTLE] Waiting {wait:.1f}s (Groq 6k TPM guard)...")
+    elapsed = time.time() - _LAST_LLM_CALL[0]
+    if elapsed < LLM_MIN_DELAY_SECONDS:
+        wait = LLM_MIN_DELAY_SECONDS - elapsed
+        if CREW_VERBOSE:
+            print(f"[THROTTLE] Waiting {wait:.1f}s")
         time.sleep(wait)
-    _last_llm_call[0] = time.time()
+    _LAST_LLM_CALL[0] = time.time()
     for attempt in range(3):
         try:
             return _original_llm_call(self, *args, **kwargs)
         except Exception as exc:
             err = str(exc).lower()
             if "rate_limit" in err or "ratelimit" in err or "429" in err:
-                backoff = 30 * (attempt + 1)
+                backoff = LLM_RATE_LIMIT_BACKOFF_SECONDS * (attempt + 1)
+                if not CREW_VERBOSE:
+                    time.sleep(backoff)
+                    _LAST_LLM_CALL[0] = time.time()
+                    if attempt == 2:
+                        raise
+                    continue
                 print(f"[THROTTLE] RateLimitError (tentative {attempt+1}/3) — backoff {backoff}s")
                 time.sleep(backoff)
-                _last_llm_call[0] = time.time()
+                _LAST_LLM_CALL[0] = time.time()
                 if attempt == 2:
                     raise
             else:
@@ -1108,6 +1134,7 @@ class OutilActionCorrective(BaseTool):
                         "ip":           str(ip),
                         "severity":     str(severite),
                         "action_type":  str(action.get("type", "")),
+                        "dataset_id":   os.getenv("PIPELINE_ACTIVE_DATASET"),
                         "command":      str(action.get("commande", "")),
                         "description":  str(action.get("description", "")),
                         "confidence":   float(confidence),
@@ -1136,19 +1163,25 @@ class OutilActionCorrective(BaseTool):
         # Phase 3 — AUTO
         # ═══════════════════════════════════════════════════════════════════
         if AGENT_MODE == "AUTO":
-
-            success_rate = get_success_rate(type_upper)
+            dataset_id = os.getenv("PIPELINE_ACTIVE_DATASET")
+            success_rate = get_success_rate(type_upper, dataset_id=dataset_id)
+            auto_eligible_action = _is_auto_eligible_action(action)
 
             # Condition d'exécution automatique :
-            # confiance suffisante ET taux de succès historique >= 80 %
-            # Si aucun historique (success_rate == 0.0) → on laisse passer
+            # confiance suffisante ET historique approuvé >= 80 %
+            # Les actions inconnues ou sans historique restent en validation humaine.
             auto_ok = (
-                confidence >= CONFIDENCE_THRESHOLD_AUTO
-                and (success_rate >= 0.80 or success_rate == 0.0)
+                auto_eligible_action
+                and confidence >= CONFIDENCE_THRESHOLD_AUTO
+                and success_rate >= 0.80
             )
 
             if not auto_ok:
-                if confidence < CONFIDENCE_THRESHOLD_AUTO:
+                if not auto_eligible_action:
+                    raison = f"Action {action.get('type')} non éligible à l'exécution AUTO"
+                elif success_rate <= 0.0:
+                    raison = "Aucun historique approuvé — validation humaine requise"
+                elif confidence < CONFIDENCE_THRESHOLD_AUTO:
                     raison = f"Confidence {confidence:.0%} < seuil {CONFIDENCE_THRESHOLD_AUTO:.0%}"
                 else:
                     raison = f"success_rate={success_rate:.0%} < 80 % — trop d'erreurs passées"
@@ -1195,7 +1228,7 @@ class OutilActionCorrective(BaseTool):
             action["success_rate"] = success_rate
 
             # Enregistrement de l'action automatique comme APPROVE dans les stats
-            enregistrer_stat_action(type_upper, "approved")
+            enregistrer_stat_action(type_upper, "approved", dataset_id=dataset_id)
 
             print(f"[AUTO] {action.get('type')} | IP={ip} | confiance={confidence:.0%} | EXECUTION")
             if "commande" in action:
@@ -1335,7 +1368,7 @@ collector_agent = Agent(
     ),
     tools=[outil_lister_logs, outil_lire_logs],
     llm=llm,
-    verbose=True,
+    verbose=CREW_VERBOSE,
     max_iter=2,
     max_retry_limit=1,
 )
@@ -1355,7 +1388,7 @@ analyst_agent = Agent(
     ),
     tools=[outil_analyser],
     llm=llm_analyst,
-    verbose=True,
+    verbose=CREW_VERBOSE,
     max_iter=2,
     max_retry_limit=1,
 )
@@ -1377,7 +1410,7 @@ detector_agent = Agent(
     ),
     tools=[outil_anomalies, outil_alarme],
     llm=llm,
-    verbose=True,
+    verbose=CREW_VERBOSE,
     max_iter=1,           # [B5] Évite les boucles infinies sur le détecteur
     max_retry_limit=1,
 )
@@ -1402,7 +1435,7 @@ corrector_agent = Agent(
     ),
     tools=[outil_correctif],
     llm=llm,
-    verbose=True,
+    verbose=CREW_VERBOSE,
 )
 
 orchestrator_agent = Agent(
@@ -1424,7 +1457,7 @@ orchestrator_agent = Agent(
     ),
     tools=[],
     llm=llm_orchestrator,
-    verbose=True,
+    verbose=CREW_VERBOSE,
 )
 
 reporter_agent = Agent(
@@ -1446,5 +1479,5 @@ reporter_agent = Agent(
     ),
     tools=[outil_rapport],
     llm=llm,
-    verbose=True,
+    verbose=CREW_VERBOSE,
 )

@@ -14,14 +14,19 @@ interface BacktestEntry {
   summary: string;
 }
 
-export const BacktestAccuracyChart = () => {
+interface Props {
+  dataset?: string;
+}
+
+export const BacktestAccuracyChart = ({ dataset = "" }: Props) => {
   const [data, setData] = useState<BacktestEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/backtest-history`);
+        const query = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
+        const res = await fetch(`${API_BASE}/api/backtest-history${query}`);
         const json = await res.json();
         // Reverse so oldest first for chart
         const sorted = (Array.isArray(json) ? json : []).reverse();
@@ -35,7 +40,7 @@ export const BacktestAccuracyChart = () => {
     fetchData();
     const id = setInterval(fetchData, 30000);
     return () => clearInterval(id);
-  }, []);
+  }, [dataset]);
 
   if (loading) return <div style={{ padding: 20, color: "#64748b" }}>Chargement…</div>;
   if (data.length === 0)

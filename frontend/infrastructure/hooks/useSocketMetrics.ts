@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import { type LiveMetrics, getMockLiveMetrics } from "../api/dashboardApi";
+import { EMPTY_LIVE_METRICS, type LiveMetrics } from "../api/dashboardApi";
 
 const WS_URL = import.meta.env.VITE_WS_URL || "http://localhost:5001";
 
@@ -11,7 +11,7 @@ export interface SocketStatus {
 
 export const useSocketMetrics = () => {
   const socketRef = useRef<Socket | null>(null);
-  const [metrics, setMetrics] = useState<LiveMetrics>(getMockLiveMetrics());
+  const [metrics, setMetrics] = useState<LiveMetrics>(EMPTY_LIVE_METRICS);
   const [status, setStatus] = useState<SocketStatus>({ connected: false, transport: "none" });
 
   useEffect(() => {

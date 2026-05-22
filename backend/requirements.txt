@@ -9,3 +9,11 @@ python-dotenv
 chromadb
 pydantic
 websockets
+celery[redis]
+email-validator
+flask
+flask-cors
+passlib[bcrypt]
+pandas
+python-jose[cryptography]
+requests

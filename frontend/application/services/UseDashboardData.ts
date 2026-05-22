@@ -28,7 +28,7 @@ export interface DashboardData {
   loading: boolean;
 }
 
-export const useDashboardData = (token?: string): DashboardData => {
+export const useDashboardData = (token?: string, dataset?: string): DashboardData => {
   const [metrics, setMetrics] = useState<LiveMetrics>(EMPTY_LIVE_METRICS);
   const [stats, setStats] = useState<DashboardStats>(EMPTY_DASHBOARD_STATS);
   const [sshHistory, setSshHistory] = useState<SshDataPoint[]>([]);
@@ -52,8 +52,8 @@ export const useDashboardData = (token?: string): DashboardData => {
 
   const refresh = useCallback(async () => {
     const [liveData, statsData] = await Promise.all([
-      fetchLiveMetrics(),
-      token ? fetchDashboardStats(token) : Promise.resolve(EMPTY_DASHBOARD_STATS),
+      fetchLiveMetrics(dataset),
+      token ? fetchDashboardStats(token, dataset) : Promise.resolve(EMPTY_DASHBOARD_STATS),
     ]);
 
     setMetrics(liveData);
@@ -65,7 +65,7 @@ export const useDashboardData = (token?: string): DashboardData => {
     const point = buildHistoryPoint(liveData);
     historyRef.current = [...historyRef.current.slice(-19), point];
     setSshHistory([...historyRef.current]);
-  }, [token, buildHistoryPoint]);
+  }, [token, dataset, buildHistoryPoint]);
 
   useEffect(() => {
     refresh();

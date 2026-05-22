@@ -256,6 +256,74 @@ def compute_temporal_pattern(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def classify_attack_profile(
+    attack_velocity: float,
+    is_velocity_spike: bool,
+    unique_attacking_ips: int,
+    ip_entropy: float,
+) -> dict[str, Any]:
+    """
+    Deterministic security classification shared by the pipeline and analyst.
+    """
+    velocity = float(attack_velocity or 0.0)
+    unique_ips = int(unique_attacking_ips or 0)
+    entropy = float(ip_entropy or 0.0)
+    spike = bool(is_velocity_spike)
+
+    if velocity > 100:
+        origin = "AUTOMATED"
+        origin_reason = f"velocity={velocity:.1f}>100"
+    elif unique_ips <= 5 and entropy < 1.0:
+        origin = "AUTOMATED"
+        origin_reason = f"unique_ips={unique_ips}<=5 and entropy={entropy:.3f}<1.0"
+    elif velocity < 20 and unique_ips > 10 and entropy > 2.0:
+        origin = "HUMAN"
+        origin_reason = (
+            f"velocity={velocity:.1f}<20 and unique_ips={unique_ips}>10 "
+            f"and entropy={entropy:.3f}>2.0"
+        )
+    else:
+        origin = "MIXED"
+        origin_reason = (
+            f"velocity={velocity:.1f}, unique_ips={unique_ips}, entropy={entropy:.3f} "
+            "did not match the automated or human rule"
+        )
+
+    if spike and velocity > 200:
+        severity = "CRITICAL"
+        severity_reason = f"spike=True and velocity={velocity:.1f}>200"
+    elif spike:
+        severity = "HIGH"
+        severity_reason = f"spike=True with velocity={velocity:.1f}"
+    elif velocity > 100:
+        severity = "HIGH"
+        severity_reason = f"velocity={velocity:.1f}>100"
+    elif unique_ips <= 5 and entropy < 1.0:
+        severity = "HIGH"
+        severity_reason = f"unique_ips={unique_ips}<=5 and entropy={entropy:.3f}<1.0"
+    else:
+        severity = "NORMAL"
+        severity_reason = (
+            f"spike=False, velocity={velocity:.1f}, unique_ips={unique_ips}, "
+            f"entropy={entropy:.3f}"
+        )
+
+    if unique_ips <= 5 and entropy < 1.5:
+        concentration = "CONCENTRATED"
+    elif unique_ips > 20 or entropy > 3.0:
+        concentration = "DISTRIBUTED"
+    else:
+        concentration = "BALANCED"
+
+    return {
+        "attack_origin": origin,
+        "attack_origin_reason": origin_reason,
+        "threat_severity": severity,
+        "threat_severity_reason": severity_reason,
+        "traffic_concentration": concentration,
+    }
+
+
 # ── Compact summary for agents ───────────────────────────────────────────────
 def get_summary_for_detector(
     erreurs_par_heure: pd.DataFrame,
@@ -283,10 +351,11 @@ def get_summary_for_detector(
     entropy_info = compute_ip_entropy(df_clean) if df_clean is not None else {}
     temporal = compute_temporal_pattern(df_clean) if df_clean is not None else {}
 
-    alert_level = (
-        "CRITICAL" if is_spike and recent_velocity > 15 else
-        "HIGH" if is_spike or recent_velocity > 5 else
-        "NORMAL"
+    classification = classify_attack_profile(
+        attack_velocity=recent_velocity,
+        is_velocity_spike=is_spike,
+        unique_attacking_ips=entropy_info.get("unique_ips", 0),
+        ip_entropy=entropy_info.get("entropy", 0.0),
     )
 
     return {
@@ -295,13 +364,18 @@ def get_summary_for_detector(
         "top_threat_weight": top_weight,
         "attack_velocity": recent_velocity,
         "is_velocity_spike": is_spike,
-        "alert_status": alert_level,
+        "alert_status": classification["threat_severity"],
         "ip_entropy": entropy_info.get("entropy", 0.0),
         "attack_pattern": entropy_info.get("interpretation", "unknown"),
         "unique_attacking_ips": entropy_info.get("unique_ips", 0),
         "night_ratio": temporal.get("night_ratio", 0.0),
         "is_scheduled_attack": temporal.get("is_scheduled", False),
         "peak_attack_hour": temporal.get("peak_hour", -1),
+        "attack_origin": classification["attack_origin"],
+        "attack_origin_reason": classification["attack_origin_reason"],
+        "threat_severity": classification["threat_severity"],
+        "threat_severity_reason": classification["threat_severity_reason"],
+        "traffic_concentration": classification["traffic_concentration"],
     }
 
 

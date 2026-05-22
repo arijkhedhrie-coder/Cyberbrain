@@ -13,7 +13,7 @@ export function AdaptiveThresholdPanel({ sessions, engines }: AdaptiveThresholdP
   const baseP1    = sshEngine?.pass1 ?? 50;
 
   // Reconstruction de l'évolution des seuils depuis sessions réelles
-  const data = sessions.slice(-20).map((s, i, arr) => ({
+  const data = sessions.slice(-20).map((s) => ({
     time:              s.date.slice(0, 16).replace("T", " "),
     fixedThreshold:    baseP1,
     // Seuil adaptatif : évolue selon la charge des sessions précédentes

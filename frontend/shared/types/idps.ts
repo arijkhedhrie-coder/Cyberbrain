@@ -61,6 +61,7 @@ export type AlarmItem = {
   country:       string;
   failures:      number;
   server_id?:    string;        // optionnel — présent dans les alarmes normalisées WebSocket
+  dataset_id?:   string;
   stage?:        string;        // "pass1" | "pass2" | "final" — étape du pipeline
 };
 
@@ -146,6 +147,7 @@ export type WorkflowActivity = {
   id: string;
   timestamp: string;
   session_id?: string;
+  dataset_id?: string;
   event_type?: string;
   stage: string;
   actor: string;
@@ -200,7 +202,7 @@ export type WsHistoryMessage = {
 
 export type WsPongMessage  = { type: "pong" };
 export type WsHeartbeat    = { type: "heartbeat" };
-export type WsFilterAck    = { type: "filter_ack"; servers?: string[]; version?: number };
+export type WsFilterAck    = { type: "filter_ack"; servers?: string[]; dataset?: string; version?: number };
 
 //  suggestion du Corrective Agent
 export type CorrectiveSuggestion = {
@@ -209,12 +211,14 @@ export type CorrectiveSuggestion = {
   ip:            string;
   severity:      string;
   action_type:   string;
+  dataset_id?:   string;
   command?:      string;
   description:   string;
   confidence:    number;
   mode:          string;
   status:        "PENDING" | "APPROVED" | "REJECTED" | "MODIFIED";
   timestamp:     string;
+  admin_note?:   string;
 };
 
 export type WsSuggestionMessage = {

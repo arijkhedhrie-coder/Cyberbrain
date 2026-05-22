@@ -7,10 +7,10 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 // ── Type serveur riche ────────────────────────────────────────────────────────
 export interface ServerInfo {
-  id:      string;   // ID S3 original (ex: "dataset_auth_2026-03-10_06-32")
-  label:   string;   // label métier (ex: "auth") — utilisé pour le filtrage API
-  display: string;   // libellé humain (ex: "SSH Auth") — affiché dans l'UI
-  sources: string[]; // tous les fichiers source correspondants
+  id:      string;
+  label:   string;
+  display: string;
+  sources: string[];
 }
 
 // ── Fallback si backend hors ligne ───────────────────────────────────────────
@@ -26,9 +26,8 @@ export function useServers() {
 
   const refresh = useCallback(async () => {
     try {
-      console.log("[useServers] fetching servers from:", `${API_BASE}/api/servers?format=rich`);
-      // ✅ [FIX-4] Format rich pour avoir id + label + display
-      const res = await fetch(`${API_BASE}/api/servers?format=rich`, {
+      console.log("[useServers] fetching datasets from:", `${API_BASE}/api/datasets?format=rich`);
+      const res = await fetch(`${API_BASE}/api/datasets?format=rich`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
         },
@@ -39,15 +38,14 @@ export function useServers() {
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
-
+      
       const data: ServerInfo[] = await res.json();
-      console.log("[useServers] servers received:", data);
+      console.log("[useServers] datasets received:", data);
 
       // ✅ [FIX-1] Si backend retourne [] → on expose la vraie situation
       // Pas de fallback statique qui masquerait le problème
       setServers(prev => {
         const next = Array.isArray(data) ? data : [];
-        // Éviter re-render si contenu identique
         return JSON.stringify(prev) !== JSON.stringify(next) ? next : prev;
       });
       setError(null);

@@ -177,7 +177,11 @@ const EngineBarChart: FC<{ engines: EngineScore[] }> = ({ engines }) => {
 // Alarm feed avec filtre sévérité
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const FilteredAlarmFeed: FC<{ alarms: AlarmItem[]; wsConnected: boolean }> = ({ alarms, wsConnected }) => {
+const FilteredAlarmFeed: FC<{ alarms: AlarmItem[]; wsConnected: boolean; isFusionView: boolean }> = ({
+  alarms,
+  wsConnected,
+  isFusionView,
+}) => {
   const [filter, setFilter] = useState<"ALL" | "CRITICAL" | "HIGH" | "MED">("ALL");
 
   const filtered = filter === "ALL" ? alarms : alarms.filter(a => a.severity === filter);
@@ -261,9 +265,10 @@ const FilteredAlarmFeed: FC<{ alarms: AlarmItem[]; wsConnected: boolean }> = ({ 
             <div style={{ fontSize: 10, color: "var(--muted,#6b7280)", flexShrink: 0 }}>{a.timestamp}</div>
             <span style={{
               fontSize: 10, padding: "2px 6px", borderRadius: 3, fontWeight: 500, flexShrink: 0,
-              background: actionStyle.bg, color: actionStyle.fg,
+              background: isFusionView ? "#E6F1FB" : actionStyle.bg,
+              color: isFusionView ? "#0C447C" : actionStyle.fg,
             }}>
-              {a.action.split("_")[0]}
+              {isFusionView ? "VIEW ONLY" : a.action.split("_")[0]}
             </span>
           </div>
         );
@@ -353,7 +358,7 @@ const ts = dd.ts ?? dd.timestamp ?? "";
 // Trust Gate enrichi
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const TrustPanel: FC<{ trust: TrustData | null }> = ({ trust }) => {
+const TrustPanel: FC<{ trust: TrustData | null; isFusionView: boolean }> = ({ trust, isFusionView }) => {
   if (!trust?.available) return (
     <div style={{ fontSize: 11, color: "var(--muted,#6b7280)" }}>
       {trust?.signals_summary ?? "Lance le pipeline pour obtenir le trust score."}
@@ -400,7 +405,9 @@ const TrustPanel: FC<{ trust: TrustData | null }> = ({ trust }) => {
 
       {trust.drift_flagged && (
         <div style={{ fontSize: 10, padding: "4px 8px", borderRadius: 4, background: "#FCEBEB", color: "#A32D2D", fontWeight: 500 }}>
-          ⚠ Drift détecté — réentraînement recommandé
+          {isFusionView
+            ? "Drift elevated in one or more local datasets. Review retraining per dataset only."
+            : "Drift détecté — réentraînement recommandé"}
         </div>
       )}
     </div>
@@ -453,10 +460,11 @@ interface Props {
   loading:     boolean;
   wsConnected: boolean;
   isLive:      boolean;
+  isFusionView: boolean;
 }
 
 export const DashboardPanel: FC<Props> = ({
-  kpis, alarms, engines, decisions, logLines, trust, activities, loading, wsConnected, isLive,
+  kpis, alarms, engines, decisions, logLines, trust, activities, loading, wsConnected, isLive, isFusionView,
 }) => {
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 320, flexDirection: "column", gap: 16, color: "var(--muted,#6b7280)", fontSize: 13 }}>
@@ -528,7 +536,7 @@ export const DashboardPanel: FC<Props> = ({
 
       {/* ── Row 2 : Live alarms filtrées ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 12 }}>
-  <FilteredAlarmFeed alarms={alarms} wsConnected={wsConnected}/>
+  <FilteredAlarmFeed alarms={alarms} wsConnected={wsConnected} isFusionView={isFusionView}/>
   
  <Card 
   title="Agent Interaction Flow"
@@ -557,7 +565,7 @@ export const DashboardPanel: FC<Props> = ({
           <Terminal lines={logLines}/>
         </Card>
         <Card title="Trust Gate — Score de confiance">
-          <TrustPanel trust={trust}/>
+          <TrustPanel trust={trust} isFusionView={isFusionView}/>
         </Card>
       </div>
 

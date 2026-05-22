@@ -5,7 +5,7 @@ import { DarkModeToggle } from "./DarkModeToggle";
 import type { Theme } from "../../../presentation/hooks/useDarkMode";
 
 
-type Section = "dashboard" | "track" | "corrective" | "forecast";
+type Section = "dashboard" | "track" | "corrective" | "forecast" | "fusion";
 
 interface Props {
   section:          Section;
@@ -25,6 +25,7 @@ const SECTION_TITLES: Record<Section, string> = {
   track:      "Track Servers — Sélection & Colonnes",
   corrective: "Agent Correcteur — Validation Semi-Automatique",
   forecast:   "Prévision — Forecast & Tendances",
+  fusion:     "Fusion — Cross-Dataset Replay Analytics",
 };
 
 export const TopBar: FC<Props> = ({

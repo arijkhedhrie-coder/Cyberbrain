@@ -9,10 +9,15 @@
 #   "CORRECTIVE_ACTION"  → protège _run_safe_corrective_action() dans main.py
 # ─────────────────────────────────────────────────────────────────────────────
 
-from app.ai.agents.memory import get_success_rate, compute_session_stability
+from app.ai.agents.memory import compute_session_stability, get_success_rate
 
 
-def should_adapt(context: str = "GLOBAL") -> dict:
+def should_adapt(
+    context: str = "GLOBAL",
+    dataset_id: str | None = None,
+    anomaly_type: str | None = None,
+    corrective_mode: str | None = None,
+) -> dict:
     """
     Décide si le système peut s'adapter selon le contexte.
 
@@ -28,7 +33,7 @@ def should_adapt(context: str = "GLOBAL") -> dict:
         "context":      str,
     }
     """
-    stability    = compute_session_stability()
+    stability    = compute_session_stability(dataset_id=dataset_id)
     confidence   = stability.get("confidence", "LOW")
     stable_sigs  = stability.get("stable_signals", 0)
 
@@ -38,25 +43,27 @@ def should_adapt(context: str = "GLOBAL") -> dict:
     # GLOBAL            = risque faible         → critères souples
 
     if context == "CORRECTIVE_ACTION":
-        # Action concrète sur le système → exige confiance maximale
-        required_confidence = "HIGH"
+        # En demo, le mode SUGGESTION peut continuer avec une stabilité MEDIUM,
+        # tout en gardant TRAINING/AUTO sur le niveau strict existant.
+        mode = str(corrective_mode or "SUGGESTION").strip().upper() or "SUGGESTION"
+        required_confidence = "MEDIUM" if mode == "SUGGESTION" else "HIGH"
         required_rate       = 0.75
-        anomaly_type        = "BRUTE-FORCE SSH"   # type le plus critique
+        success_lookup_type = str(anomaly_type or "GLOBAL").strip().upper() or "GLOBAL"
 
     elif context == "PASS2":
         # Réajustement des seuils de détection → confiance intermédiaire
         required_confidence = "MEDIUM"
         required_rate       = 0.60
-        anomaly_type        = "GLOBAL"
+        success_lookup_type = "GLOBAL"
 
     else:  # GLOBAL
         # Adaptation des seuils de base → critères souples
         required_confidence = "LOW"    # accepte même LOW (on refuse seulement si vide)
         required_rate       = 0.50
-        anomaly_type        = "GLOBAL"
+        success_lookup_type = "GLOBAL"
 
     # ── Récupération du taux de succès ────────────────────────────────────────
-    rate = get_success_rate(anomaly_type)
+    rate = get_success_rate(success_lookup_type, dataset_id=dataset_id)
 
     # ── Règle 1 : taux de succès insuffisant ──────────────────────────────────
     if rate > 0 and rate < required_rate:
@@ -66,6 +73,9 @@ def should_adapt(context: str = "GLOBAL") -> dict:
             "success_rate": rate,
             "stability":    stability,
             "context":      context,
+            "dataset_id":   dataset_id,
+            "anomaly_type": success_lookup_type,
+            "corrective_mode": corrective_mode,
         }
 
     # ── Règle 2 : stabilité insuffisante ─────────────────────────────────────
@@ -80,6 +90,9 @@ def should_adapt(context: str = "GLOBAL") -> dict:
             "success_rate": rate,
             "stability":    stability,
             "context":      context,
+            "dataset_id":   dataset_id,
+            "anomaly_type": success_lookup_type,
+            "corrective_mode": corrective_mode,
         }
 
     # ── Règle 3 : PASS2 bloqué si drift élevé ────────────────────────────────
@@ -92,6 +105,9 @@ def should_adapt(context: str = "GLOBAL") -> dict:
                 "success_rate": rate,
                 "stability":    stability,
                 "context":      context,
+                "dataset_id":   dataset_id,
+                "anomaly_type": success_lookup_type,
+                "corrective_mode": corrective_mode,
             }
 
     # ── Autorisé ──────────────────────────────────────────────────────────────
@@ -101,4 +117,7 @@ def should_adapt(context: str = "GLOBAL") -> dict:
         "success_rate": rate,
         "stability":    stability,
         "context":      context,
+        "dataset_id":   dataset_id,
+        "anomaly_type": success_lookup_type,
+        "corrective_mode": corrective_mode,
     }

@@ -25,7 +25,8 @@ import { Sidebar }              from "../components/dashboard/Sidebar";
 import { TopBar }               from "../components/dashboard/TopBar";
 import { DashboardPanel }       from "../components/dashboard/DashboardPanel";
 import { CorrectiveAgentPanel } from "../components/dashboard/CorrectiveAgentPanel";
-import { TrackServersPanel }    from "../components/dashboard/TrackServersPanel";
+
+import { ServerSelector } from "../components/dashboard/ServerSelector";
 
 // ── Nouveaux composants analytiques ──────────────────────────────
 import { EntropyChart }          from "../components/charts/EntropyChart";
@@ -36,6 +37,7 @@ import { BacktestAccuracyChart } from "../components/charts/BacktestAccuracyChar
 import { AttackTimelinePanel } from "../components/panels/AttackTimelinePanel";
 import { ExplainabilityPanel } from "../components/panels/ExplainibilityPanel";
 import { AdaptiveThresholdPanel } from "../components/panels/AdaptiveThresholdPanel";
+import { FusionPanel } from "../components/fusion/FusionPanel";
 
 // ── Types ─────────────────────────────────────────────────────────
 import type { EntropyPoint } from "../../shared/types/analytics";
@@ -48,7 +50,7 @@ import "../../shared/style/Sidebar.css";
 import { ChatBot } from "../components/Chat/ChatBot";
 import { ForecastPanel } from "../components/forecast/ForecastPanel";
 
-type Section = "dashboard" | "track" | "corrective" | "forecast";
+type Section = "dashboard" | "corrective" | "forecast" | "fusion";
 
 type PredictionSummary = {
   available: boolean;
@@ -187,10 +189,11 @@ export const DashboardPage = () => {
 
   const [theme, toggleTheme]                  = useDarkMode();
   const [section, setSection]                 = useState<Section>("dashboard");
-  const [selectedServers, setSelectedServers] = useState<string[]>([]);
+  const [selectedDataset, setSelectedDataset] = useState<string>(() => localStorage.getItem("selected_dataset") || "");
   const [relancerLoading, setRelancerLoading] = useState(false);
   const [prediction, setPrediction]           = useState<PredictionSummary | null>(null);
   const [dashboardTab, setDashboardTab]       = useState<"liveops" | "analytics" | "pipeline">("liveops");
+  const isFusionView = ["fusion", "__fusion__", "merged", "__merged__"].includes(selectedDataset.toLowerCase());
 
   const handleSectionChange = useCallback((next: Section) => {
     setSection(next);
@@ -203,7 +206,8 @@ export const DashboardPage = () => {
     let mounted = true;
     const fetchPrediction = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/prediction`);
+        const query = selectedDataset ? `?dataset=${encodeURIComponent(selectedDataset)}` : "";
+        const res = await fetch(`${API_BASE}/api/prediction${query}`);
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
         if (!mounted) return;
@@ -216,7 +220,7 @@ export const DashboardPage = () => {
     fetchPrediction();
     const id = setInterval(fetchPrediction, 10000);
     return () => { mounted = false; clearInterval(id); };
-  }, [API_BASE]);
+  }, [API_BASE, selectedDataset]);
 
   // ╔══════════════════════════════════════════════════════════╗
   // ║   SOURCE UNIQUE — useIdpsDashboard                      ║
@@ -241,7 +245,7 @@ export const DashboardPage = () => {
     wsConnected,
     isLive,
     suggestions,
-  } = useIdpsDashboard(selectedServers);
+  } = useIdpsDashboard(selectedDataset);
 
   // ── Sécurité : tableaux toujours définis ─────────────────────
   const safeAlarms    = useMemo(() => Array.isArray(alarms)    ? alarms    : [], [alarms]);
@@ -294,8 +298,9 @@ export const DashboardPage = () => {
     }
   }, [relancerLoading]);
 
-  const handleServersChange = useCallback((servers: string[]) => {
-    setSelectedServers(servers);
+  const handleServersChange = useCallback((dataset: string) => {
+    setSelectedDataset(dataset);
+    localStorage.setItem("selected_dataset", dataset);
   }, []);
 
   // ─────────────────────────────────────────────────────────────
@@ -335,7 +340,7 @@ export const DashboardPage = () => {
           />
 
           <div className="main-content__scroll">
-
+            
             {/* ══════════════════════════════════════════════════
                 SECTION — DASHBOARD (with tabs)
             ══════════════════════════════════════════════════ */}
@@ -365,8 +370,78 @@ export const DashboardPage = () => {
                       {tab === "analytics" && "📊 Threat Analytics"}
                       {tab === "pipeline" && "⚙️ Pipeline & ML Health"}
                     </button>
-                  ))}
+                    
+                  )
+                  )
+                  }
+                  <div style={{ width: 1, height: 28, background: "#1e293b", margin: "0 4px" }} />
+
+                  <ServerSelector selected={selectedDataset} onChange={handleServersChange} />
+                  <span style={{
+                    fontSize: 10,
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    border: `1px solid ${isFusionView ? "rgba(56,189,248,0.4)" : "rgba(29,158,117,0.24)"}`,
+                    background: isFusionView ? "rgba(8,47,73,0.55)" : "rgba(15,118,110,0.16)",
+                    color: isFusionView ? "#7dd3fc" : "#6ee7b7",
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}>
+                    {isFusionView ? "READ ONLY" : "LOCAL DATASET"}
+                  </span>
+                  {isFusionView && (
+                    <span style={{
+                      fontSize: 10,
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      border: "1px solid rgba(251,191,36,0.4)",
+                      background: "rgba(120,53,15,0.34)",
+                      color: "#fcd34d",
+                      fontWeight: 700,
+                      letterSpacing: "0.08em",
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}>
+                      ANALYSIS ONLY
+                    </span>
+                  )}
                 </div>
+                {isFusionView && (
+                  <div style={{
+                    marginBottom: 16,
+                    padding: "14px 16px",
+                    borderRadius: 12,
+                    border: "1px solid rgba(56,189,248,0.28)",
+                    background: "linear-gradient(135deg, rgba(8,47,73,0.58), rgba(15,23,42,0.74))",
+                    color: "#dbeafe",
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                  }}>
+                    <div style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginBottom: 8,
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background: "rgba(125,211,252,0.14)",
+                      border: "1px solid rgba(125,211,252,0.22)",
+                      fontWeight: 700,
+                      letterSpacing: "0.08em",
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}>
+                      FUSION OVERLAY · READ ONLY
+                    </div>
+                    <div>
+                      Fusion aggregates cross-dataset visibility only. Blocking, retraining, threshold changes,
+                      corrective actions, and memory updates remain local to each dataset.
+                    </div>
+                  </div>
+                )}
+                
+                
+
+
 
                 {/* ── TAB: Live Ops ── */}
                 {dashboardTab === "liveops" && (
@@ -381,13 +456,14 @@ export const DashboardPage = () => {
                     loading={loading}
                     wsConnected={wsConnected}
                     isLive={isLive}
+                    isFusionView={isFusionView}
                   />
                 )}
 
                 {/* ── TAB: Threat Analytics ── */}
                 {dashboardTab === "analytics" && (
                   <>
-                    <MinimizationChart />
+                    <MinimizationChart dataset={selectedDataset} />
                     <div className="analytics-divider" style={{ marginTop: 16, marginBottom: 8 }}>
                       <span className="analytics-divider__label">◈ Deep Analytics</span>
                     </div>
@@ -436,7 +512,7 @@ export const DashboardPage = () => {
                           <TrustPanel trust={trust} />
                         </div>
                       )}
-                      <BacktestAccuracyChart />
+                      <BacktestAccuracyChart dataset={selectedDataset} />
                     </div>
 
                     {/* Explainable AI (full width, interactive) */}
@@ -459,26 +535,82 @@ export const DashboardPage = () => {
                 SECTION — AGENT CORRECTEUR (INCHANGÉ)
             ══════════════════════════════════════════════════ */}
             {section === "corrective" && (
-              <CorrectiveAgentPanel
-                suggestions={suggestions}
-                wsConnected={wsConnected}
-              />
+              isFusionView ? (
+                <div style={{
+                  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                  background: "#0a0e1a",
+                  color: "#c9d1e0",
+                  padding: "20px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.07)",
+                }}>
+                  Fusion mode is analysis-only. Corrective actions stay strictly dataset-scoped, so switch back to a
+                  specific dataset to review or validate agent suggestions.
+                </div>
+              ) : (
+                <CorrectiveAgentPanel
+                  suggestions={suggestions}
+                  activities={safeActivities}
+                  alarms={safeAlarms}
+                  wsConnected={wsConnected}
+                  selectedDataset={selectedDataset}
+                />
+              )
             )}
 
             {/* ══════════════════════════════════════════════════
                 SECTION — TRACK SERVERS (INCHANGÉ)
             ══════════════════════════════════════════════════ */}
-            {section === "track" && (
-              <TrackServersPanel
-                kpis={kpis}
-                alarms={safeAlarms}
-                loading={loading}
-                wsConnected={wsConnected}
-                onServersChange={handleServersChange}
-              />
+            {section === "fusion" && (
+              <>
+                <div style={{
+                  display: "flex", gap: 8, marginBottom: 16, alignItems: "center", flexWrap: "wrap",
+                  background: "rgba(15,23,42,0.5)", borderRadius: 10,
+                  padding: "10px 12px", backdropFilter: "blur(8px)",
+                }}>
+                  <div style={{
+                    fontSize: 11,
+                    color: "#7dd3fc",
+                    fontWeight: 800,
+                    letterSpacing: "0.14em",
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}>
+                    FUSION DATASET SCOPE
+                  </div>
+                  <ServerSelector selected={selectedDataset} onChange={handleServersChange} />
+                  <span style={{
+                    fontSize: 10,
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    border: `1px solid ${isFusionView ? "rgba(56,189,248,0.4)" : "rgba(148,163,184,0.24)"}`,
+                    background: isFusionView ? "rgba(8,47,73,0.55)" : "rgba(51,65,85,0.34)",
+                    color: isFusionView ? "#7dd3fc" : "#cbd5e1",
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}>
+                    {isFusionView ? "CROSS-DATASET OVERLAY" : "DATASET-LOCAL REPLAY"}
+                  </span>
+                  <span style={{
+                    fontSize: 10,
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    border: "1px solid rgba(251,191,36,0.3)",
+                    background: "rgba(120,53,15,0.24)",
+                    color: "#fcd34d",
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}>
+                    READ ONLY
+                  </span>
+                </div>
+
+                <FusionPanel dataset={selectedDataset} isFusionView={isFusionView} />
+              </>
             )}
 
-            {section === "forecast" && <ForecastPanel />}
+            {section === "forecast" && <ForecastPanel dataset={selectedDataset} />}
 
           </div>
         </div>
