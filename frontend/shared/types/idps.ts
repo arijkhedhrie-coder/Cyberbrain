@@ -49,6 +49,7 @@ export type AlarmAction   = "BLOCK_NOW" | "WATCHLIST" | "ESCALATE" | "MONITOR";
 
 export type AlarmItem = {
   id:            string;
+  event_id?:     string;
   timestamp:     string;        // "HH:MM:SS"
   type:          string;
   source_ip:     string;
@@ -71,6 +72,14 @@ export type AlarmItem = {
 export type LiveAlarmsResponse = {
   count:  number;
   alarms: AlarmItem[];
+};
+
+export type AlarmHistoryResponse = {
+  items: AlarmItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
 };
 
 
@@ -118,6 +127,125 @@ export type SessionSummary = {
 
 
 // ─── /api/trust  (_build_trust) ───────────────────────────────────────────────
+export type ThresholdHistoryEngine = {
+  pass1: number | null;
+  pass2: number | null;
+  changed: boolean;
+};
+
+export type ThresholdHistoryEntry = {
+  timestamp: string;
+  session_id: string;
+  threat_level: string;
+  pass2_ran: boolean;
+  nb_alarms_pass1: number;
+  nb_alarms_final: number;
+  alarm_delta: number;
+  agent_reasoning: string;
+  agent_config_summary: string;
+  engines: Record<string, ThresholdHistoryEngine>;
+  changed_engines: string[];
+  gate: {
+    accepted: boolean;
+    mode: string;
+    version_id?: string | null;
+    trust_score: number | null;
+    passed: string[];
+    failed: string[];
+  };
+};
+
+export type ExplainabilityEvidence = {
+  label: string;
+  value: string;
+  detail: string;
+  weight: number;
+  tone: "risk" | "support" | "context";
+  source: string;
+};
+
+export type ExplainabilityAlarm = {
+  id: string;
+  timestamp: string;
+  type: string;
+  source_ip: string;
+  severity: string;
+  engine: string;
+  score: number;
+  message: string;
+  human_insight: string;
+  action: string;
+  country: string;
+  failures: number;
+  dataset_id: string;
+  stage: string;
+  models_agreed: number;
+  model_agreement: number | null;
+  agreement_label: string;
+  layer0_risk: number | null;
+  layer0_flags: string[];
+  threshold_snapshot: Record<string, unknown> | null;
+};
+
+export type ExplainabilityData = {
+  available: boolean;
+  generated_from: string;
+  dataset_scope: "local" | "fusion";
+  summary: string;
+  top_alarm: ExplainabilityAlarm | null;
+  model_context: {
+    agreement: number | null;
+    models_agreed: number;
+    agreement_label: string;
+    trust_score: number | null;
+    trust_label: string;
+    drift_label: string;
+    stability: string;
+    signals_summary: string;
+  };
+  evidence: ExplainabilityEvidence[];
+  engine_contributions: Array<{
+    engine: string;
+    alarms: number;
+    status: string;
+    pass1: number | null;
+    pass2: number | null;
+    rerun_p2: boolean;
+  }>;
+  latest_decision: {
+    agent: string;
+    action: string;
+    reasoning: string;
+    confidence: number | null;
+    severity: string;
+    timestamp: string;
+    approved: boolean | null;
+  } | null;
+  prediction_context: {
+    score: number;
+    risk_level: string;
+    flags: string[];
+    explanations: string[];
+    message: string;
+  } | null;
+  threshold_context:
+    | {
+        engine: string;
+        pass?: number | null;
+        issued_by?: string | null;
+        threshold?: number | null;
+        threat_level?: string | null;
+        confidence?: number | null;
+        corr_window?: number | null;
+        pass1?: number | null;
+        pass2?: number | null;
+        changed?: boolean;
+        gate_mode?: string | null;
+        gate_accepted?: boolean;
+      }
+    | null;
+};
+
 export type TrustData = {
   available:             boolean;
   model_agreement:       number | null;

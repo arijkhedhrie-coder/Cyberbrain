@@ -1,292 +1,269 @@
-// presentation/components/panels/ExplainabilityPanel.tsx
-import { useState } from "react";
 import type { ExplainabilityPanelProps } from "../../../shared/types/analyticsProps";
 
-export function ExplainabilityPanel({
-  decisions,
-  suggestions,
-  trust,
-  topAlarm,
-  kpis,
-  engines,
-}: ExplainabilityPanelProps) {
-  const [expanded, setExpanded] = useState(true);
+const formatTime = (value?: string | null): string => {
+  if (!value) return "N/D";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString([], {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 
-  if (!topAlarm) {
+const formatPct = (value?: number | null): string => {
+  if (value === null || value === undefined || Number.isNaN(value)) return "N/D";
+  return `${Math.round(value * 100)}%`;
+};
+
+const severityPalette = (severity?: string) => {
+  const key = String(severity ?? "INFO").toUpperCase();
+  if (key === "CRITICAL") {
+    return { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.24)", color: "#fca5a5" };
+  }
+  if (key === "HIGH") {
+    return { bg: "rgba(249,115,22,0.12)", border: "rgba(249,115,22,0.24)", color: "#fdba74" };
+  }
+  return { bg: "rgba(56,189,248,0.12)", border: "rgba(56,189,248,0.24)", color: "#7dd3fc" };
+};
+
+export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
+  if (!data?.available) {
     return (
-      <div className="chart-card explain-card">
+      <div className="chart-card" style={{ padding: 18 }}>
         <div className="chart-header">
-          <span className="chart-title">Explainable AI</span>
+          <span className="chart-title">Pourquoi cette decision</span>
         </div>
-        <div className="chart-empty">Aucune alarme — système clean ✓</div>
+        <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.7 }}>
+          Aucune explication detaillee n'est encore disponible pour cette source.
+        </div>
       </div>
     );
   }
 
-  const agreement = trust.model_agreement ?? trust.confidence_in_metrics ?? 1.0;
-  const modelsAgreed = engines.filter((engine) => (engine.alarms ?? 0) > 0).length;
-  const agreementPct = Math.round(agreement * 100);
-
-  // Build feature contributions from real KPI data
-  const rawFeatures = [
-    { name: "SSH Failures",    value: kpis?.ssh_failures    ?? 0, label: `${kpis?.ssh_failures ?? 0}` },
-    { name: "IP Entropy",      value: (kpis?.ip_entropy     ?? 0) * 20, label: (kpis?.ip_entropy ?? 0).toFixed(2) },
-    { name: "Attack Velocity", value: kpis?.attack_velocity ?? 0, label: `${Math.round(kpis?.attack_velocity ?? 0)}/min` },
-    { name: "Unique IPs",      value: kpis?.unique_attacking_ips ?? 0, label: `${kpis?.unique_attacking_ips ?? 0}` },
-    { name: "Night Ratio",     value: (kpis?.night_ratio   ?? 0) * 100, label: `${((kpis?.night_ratio ?? 0) * 100).toFixed(0)}%` },
-    { name: "Noise Ratio",     value: (kpis?.noise_ratio   ?? 0) * 100, label: `${((kpis?.noise_ratio ?? 0) * 100).toFixed(1)}%` },
-  ]
-    .filter(f => f.value > 0)
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 5);
-
-  // Waterfall data
-  const baseline = 0;
-  const waterfallData = rawFeatures.map((f, idx) => {
-    const start = idx === 0 ? baseline : rawFeatures.slice(0, idx).reduce((s, x) => s + x.value, baseline);
-    return { ...f, start, end: start + f.value };
-  });
-  const total = rawFeatures.reduce((s, f) => s + f.value, 0);
-
-  // Engine contributions
-  const totalAlarms = engines.reduce((s, e) => s + (e.alarms ?? 0), 1);
-  const engineContribs = engines
-    .filter(e => (e.alarms ?? 0) > 0)
-    .map(e => ({
-      engine: e.engine,
-      pct:    Math.round(((e.alarms ?? 0) / totalAlarms) * 100),
-    }))
-    .sort((a, b) => b.pct - a.pct);
-
-  const lastDecision = decisions[0];
-  const topSuggestion = suggestions[0] ?? null;
-
-  const getFeatureColor = (name: string) => {
-    const colors: Record<string, string> = {
-      "SSH Failures":    "#ef4444",
-      "IP Entropy":      "#f59e0b",
-      "Attack Velocity": "#f97316",
-      "Unique IPs":      "#3b82f6",
-      "Night Ratio":     "#a855f7",
-      "Noise Ratio":     "#8b5cf6",
-    };
-    return colors[name] ?? "#64748b";
-  };
+  const topAlarm = data.top_alarm;
+  const agreement = data.model_context.agreement ?? data.model_context.trust_score ?? 0;
+  const agreementPct = Math.max(0, Math.min(100, Math.round(agreement * 100)));
+  const severity = severityPalette(topAlarm?.severity);
+  const evidence = data.evidence.slice(0, 4);
+  const activeEngines = data.engine_contributions.filter((engine) => engine.alarms > 0).slice(0, 4);
 
   return (
-    <div style={{
-      background: "rgba(15, 23, 42, 0.7)",
-      backdropFilter: "blur(12px)",
-      border: "1px solid rgba(0, 212, 255, 0.15)",
-      borderRadius: 16,
-      marginTop: 16,
-      transition: "all 0.3s",
-      overflow: "hidden",
-    }}>
-      {/* Collapsible Header */}
-      <div
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          padding: "16px 20px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          cursor: "pointer",
-          borderBottom: expanded ? "1px solid rgba(0,212,255,0.1)" : "none",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", letterSpacing: 1 }}>
-            🧠 Explainable AI
-          </span>
-          <span className={topAlarm.severity === "CRITICAL" ? "badge-crit" : "badge-warn"}>
-            {topAlarm.type}
-          </span>
-        </div>
-        <span style={{ color: "#64748b", fontSize: 18 }}>{expanded ? "▼" : "▶"}</span>
-      </div>
-
-      {expanded && (
-        <div style={{ padding: "20px 24px" }}>
-          {/* Main alarm info + Model Agreement ring */}
-          <div style={{ display: "flex", gap: 32, alignItems: "center", marginBottom: 24 }}>
-            {/* Agreement ring */}
-            <div style={{ position: "relative", width: 100, height: 100, flexShrink: 0 }}>
-              <svg viewBox="0 0 100 100" width={100} height={100}>
-                <circle cx="50" cy="50" r="44" fill="none" stroke="#1e293b" strokeWidth="6" />
-                <circle
-                  cx="50" cy="50" r="44"
-                  fill="none"
-                  stroke="#10b981"
-                  strokeWidth="6"
-                  strokeDasharray={`${agreementPct * 2.76} 276`}
-                  strokeLinecap="round"
-                  transform="rotate(-90 50 50)"
-                />
-              </svg>
-              <div style={{
-                position: "absolute", inset: 0, display: "flex",
-                flexDirection: "column", alignItems: "center", justifyContent: "center",
-              }}>
-                <span style={{ fontSize: 20, fontWeight: 700, color: "#e2e8f0" }}>{agreementPct}%</span>
-                <span style={{ fontSize: 8, color: "#64748b" }}>agreement</span>
-              </div>
-            </div>
-
-            {/* Alarm details */}
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 6 }}>
-                {topAlarm.action} · Score {topAlarm.score.toFixed(1)}
-              </div>
-              {topAlarm.human_insight && (
-                <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 8 }}>
-                  {topAlarm.human_insight}
-                </div>
-              )}
-              <div style={{ fontSize: 10, color: "#64748b" }}>
-                IP: {topAlarm.source_ip} · Engine: {topAlarm.engine} · {modelsAgreed}/4 models agree
-              </div>
-            </div>
-          </div>
-
-          {/* Waterfall Feature Contributions */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", marginBottom: 12 }}>
-              Feature Contributions
-            </div>
-            <div style={{ position: "relative", height: waterfallData.length * 36 }}>
-              {waterfallData.map((f, idx) => {
-                const width = Math.max(2, (f.value / total) * 100);
-                const left = (f.start / total) * 100;
-                return (
-                  <div key={f.name} style={{
-                    position: "absolute", left: 0, right: 0,
-                    height: 28, top: idx * 36,
-                    display: "flex", alignItems: "center",
-                  }}>
-                    {/* Feature label */}
-                    <span style={{
-                      width: 120, textAlign: "right", paddingRight: 12,
-                      fontSize: 10, color: "#64748b",
-                    }}>
-                      {f.name}
-                    </span>
-                    {/* Bar */}
-                    <div style={{
-                      position: "relative", flex: 1, height: 22,
-                    }}>
-                      <div style={{
-                        position: "absolute",
-                        left: `${left}%`,
-                        width: `${width}%`,
-                        height: "100%",
-                        borderRadius: 6,
-                        background: getFeatureColor(f.name),
-                        opacity: 0.85,
-                        display: "flex", alignItems: "center",
-                        justifyContent: "flex-end",
-                        paddingRight: 6,
-                      }}>
-                        <span style={{ fontSize: 9, color: "#fff", fontWeight: 600 }}>
-                          +{f.value.toFixed(0)}
-                        </span>
-                      </div>
-                      {/* connecting line */}
-                      {idx < waterfallData.length - 1 && (
-                        <div style={{
-                          position: "absolute",
-                          left: `${left + width}%`,
-                          top: -6,
-                          width: 1, height: 12,
-                          background: "#475569",
-                        }} />
-                      )}
-                    </div>
-                    {/* value label */}
-                    <span style={{
-                      width: 60, paddingLeft: 8,
-                      fontSize: 10, color: "#94a3b8",
-                    }}>
-                      {f.label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Engine Contributions */}
-          {engineContribs.length > 0 && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", marginBottom: 10 }}>
-                Detection Engines
-              </div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {engineContribs.map(({ engine, pct }) => (
-                  <span key={engine} style={{
-                    padding: "4px 10px",
-                    borderRadius: 20,
-                    background: "rgba(0,212,255,0.1)",
-                    border: "1px solid rgba(0,212,255,0.2)",
-                    fontSize: 11,
-                    color: "#e2e8f0",
-                    display: "flex", alignItems: "center", gap: 6,
-                  }}>
-                    <span style={{ fontWeight: 700 }}>{engine}</span>
-                    <span style={{ color: "#00d4ff" }}>{pct}%</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Agent Decision */}
-          {lastDecision && (
-            <div style={{
-              marginBottom: 16,
-              padding: "10px 14px",
-              borderRadius: 8,
-              background: "rgba(30, 41, 59, 0.6)",
-            }}>
-              <div style={{ fontSize: 10, color: "#64748b", marginBottom: 4 }}>Last Agent Decision</div>
-              <div style={{ fontSize: 12, color: "#e2e8f0" }}>
-                <b>{lastDecision.agent}</b> → {lastDecision.action}
-              </div>
-              {lastDecision.reasoning && (
-                <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
-                  {lastDecision.reasoning.slice(0, 150)}…
-                </div>
-              )}
-            </div>
-          )}
-
-          {topSuggestion && (
-            <div
+    <div
+      className="chart-card"
+      style={{
+        padding: 20,
+        background: "linear-gradient(160deg, rgba(8,15,28,0.96), rgba(15,23,42,0.9))",
+        border: "1px solid rgba(148,163,184,0.12)",
+        borderRadius: 18,
+      }}
+    >
+      <div className="chart-header" style={{ alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
+        <div style={{ display: "grid", gap: 8 }}>
+          <span className="chart-title">Pourquoi cette decision</span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <span
               style={{
-                marginBottom: 16,
-                padding: "10px 14px",
-                borderRadius: 8,
-                background: "rgba(30, 41, 59, 0.6)",
+                padding: "4px 10px",
+                borderRadius: 999,
+                fontSize: 10,
+                fontWeight: 700,
+                background: severity.bg,
+                color: severity.color,
+                border: `1px solid ${severity.border}`,
               }}
             >
-              <div style={{ fontSize: 10, color: "#64748b", marginBottom: 4 }}>
-                Corrective Suggestion
-              </div>
-              <div style={{ fontSize: 12, color: "#e2e8f0" }}>
-                <b>{topSuggestion.action_type}</b> · {topSuggestion.description}
-              </div>
-              <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
-                IP {topSuggestion.ip} · confiance {(topSuggestion.confidence * 100).toFixed(0)}%
-              </div>
+              {topAlarm?.type ?? "AUCUNE ALERTE"}
+            </span>
+            <span
+              style={{
+                padding: "4px 10px",
+                borderRadius: 999,
+                fontSize: 10,
+                fontWeight: 700,
+                background: "rgba(125,211,252,0.1)",
+                color: "#7dd3fc",
+                border: "1px solid rgba(125,211,252,0.2)",
+              }}
+            >
+              {data.generated_from}
+            </span>
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginLeft: "auto",
+            minWidth: 120,
+            padding: "12px 14px",
+            borderRadius: 14,
+            background: "rgba(15,23,42,0.62)",
+            border: "1px solid rgba(148,163,184,0.12)",
+            textAlign: "right",
+          }}
+        >
+          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 6 }}>ACCORD ENTRE MODELES</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "#e2e8f0" }}>{agreementPct}%</div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1.2fr 0.8fr",
+          gap: 16,
+          marginBottom: 18,
+        }}
+      >
+        <div
+          style={{
+            padding: "16px 18px",
+            borderRadius: 14,
+            background: "rgba(15,23,42,0.52)",
+            border: "1px solid rgba(148,163,184,0.12)",
+          }}
+        >
+          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 8 }}>RESUME</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>
+            {topAlarm ? `${topAlarm.action} sur ${topAlarm.source_ip}` : "Aucune alerte selectionnee"}
+          </div>
+          <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.75 }}>{data.summary}</div>
+          {topAlarm && (
+            <div style={{ marginTop: 10, fontSize: 11, color: "#64748b", lineHeight: 1.6 }}>
+              Moteur {topAlarm.engine} · Score {topAlarm.score.toFixed(1)} · {formatTime(topAlarm.timestamp)}
             </div>
           )}
+        </div>
 
-          {/* Trust Metrics */}
-          <div style={{ display: "flex", gap: 20, fontSize: 10, color: "#64748b" }}>
-            <span>Agreement: <b style={{ color: "#00d4ff" }}>{((trust.model_agreement ?? 0) * 100).toFixed(0)}%</b></span>
-            <span>Drift: <b style={{ color: trust.drift_flagged ? "#ef4444" : "#10b981" }}>{trust.drift_label}</b></span>
-            <span>Stability: <b>{trust.stability}</b></span>
+        <div
+          style={{
+            padding: "16px 18px",
+            borderRadius: 14,
+            background: "rgba(15,23,42,0.52)",
+            border: "1px solid rgba(148,163,184,0.12)",
+            display: "grid",
+            gap: 10,
+          }}
+        >
+          {[
+            ["Confiance", data.model_context.trust_label],
+            ["Ecart", data.model_context.drift_label],
+            ["Stabilite", data.model_context.stability],
+            ["Portee", data.dataset_scope.toUpperCase()],
+          ].map(([label, value]) => (
+            <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11 }}>
+              <span style={{ color: "#64748b" }}>{label}</span>
+              <span style={{ color: "#e2e8f0", fontWeight: 700, textAlign: "right" }}>{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {evidence.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#64748b", marginBottom: 10 }}>
+            SIGNAUX CLES
           </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {evidence.map((item) => (
+              <div
+                key={`${item.source}:${item.label}`}
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  background: "rgba(15,23,42,0.42)",
+                  border: "1px solid rgba(148,163,184,0.12)",
+                  display: "grid",
+                  gridTemplateColumns: "140px 1fr 60px",
+                  gap: 12,
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ fontSize: 11, color: "#e2e8f0", fontWeight: 700 }}>{item.label}</div>
+                <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6 }}>{item.detail}</div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 12, color: "#7dd3fc", fontWeight: 700 }}>{item.value}</div>
+                  <div style={{ fontSize: 9, color: "#64748b" }}>{item.weight.toFixed(0)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
+        <div
+          style={{
+            padding: "14px 16px",
+            borderRadius: 12,
+            background: "rgba(15,23,42,0.42)",
+            border: "1px solid rgba(148,163,184,0.12)",
+          }}
+        >
+          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 8 }}>CONTEXTE DES SEUILS</div>
+          {data.threshold_context ? (
+            <>
+              <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 700, marginBottom: 6 }}>
+                {data.threshold_context.engine}{" "}
+                {data.threshold_context.pass1 !== undefined && data.threshold_context.pass2 !== undefined
+                  ? `${data.threshold_context.pass1} -> ${data.threshold_context.pass2}`
+                  : "seuil enregistre"}
+              </div>
+              <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6 }}>
+                Validation {data.threshold_context.gate_mode ?? "N/D"} · acceptee{" "}
+                {data.threshold_context.gate_accepted ? "oui" : "non"}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6 }}>
+              Aucun contexte de seuil n'a ete lie a cette explication.
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            padding: "14px 16px",
+            borderRadius: 12,
+            background: "rgba(15,23,42,0.42)",
+            border: "1px solid rgba(148,163,184,0.12)",
+          }}
+        >
+          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 8 }}>MOTEURS ACTIFS</div>
+          {activeEngines.length > 0 ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {activeEngines.map((engine) => (
+                <span
+                  key={engine.engine}
+                  style={{
+                    padding: "5px 10px",
+                    borderRadius: 999,
+                    background: "rgba(125,211,252,0.08)",
+                    border: "1px solid rgba(125,211,252,0.16)",
+                    fontSize: 11,
+                    color: "#e2e8f0",
+                  }}
+                >
+                  {engine.engine} · {engine.alarms}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6 }}>
+              Aucun moteur actif n'a ete lie a cette explication.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {data.latest_decision && (
+        <div style={{ marginTop: 16, fontSize: 11, color: "#94a3b8", lineHeight: 1.7 }}>
+          Derniere decision du systeme : <span style={{ color: "#e2e8f0", fontWeight: 700 }}>{data.latest_decision.agent}</span>
+          {" · "}
+          {data.latest_decision.action}
+          {" · "}
+          confiance {formatPct(data.latest_decision.confidence)}
         </div>
       )}
     </div>

@@ -5,6 +5,8 @@ import type {
   EngineScore,
   AgentDecision,
   SessionSummary,
+  ThresholdHistoryEntry,
+  ExplainabilityData,
   LiveAlarmsResponse,
   TrustData,
   PipelineLatest,
@@ -107,11 +109,52 @@ const sortSuggestions = (arr: CorrectiveSuggestion[]): CorrectiveSuggestion[] =>
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 
+const normalizeSuggestionPart = (value: unknown): string =>
+  String(value ?? "").trim().toLowerCase();
+
+const suggestionFingerprint = (suggestion: CorrectiveSuggestion): string =>
+  [
+    normalizeSuggestionPart(suggestion.dataset_id),
+    normalizeSuggestionPart(suggestion.anomaly_type),
+    normalizeSuggestionPart(suggestion.ip),
+    normalizeSuggestionPart(suggestion.action_type),
+    normalizeSuggestionPart(suggestion.command),
+  ].join("|");
+
+const suggestionStatusRank = (status: CorrectiveSuggestion["status"]): number => {
+  if (status === "PENDING") return 0;
+  return 1;
+};
+
+const shouldReplaceSuggestion = (
+  current: CorrectiveSuggestion,
+  incoming: CorrectiveSuggestion,
+): boolean => {
+  const currentTs = new Date(current.timestamp).getTime();
+  const incomingTs = new Date(incoming.timestamp).getTime();
+
+  if (incomingTs !== currentTs) {
+    return incomingTs > currentTs;
+  }
+
+  const currentRank = suggestionStatusRank(current.status);
+  const incomingRank = suggestionStatusRank(incoming.status);
+  if (incomingRank !== currentRank) {
+    return incomingRank > currentRank;
+  }
+
+  return incoming.suggestion_id >= current.suggestion_id;
+};
+
 const mergeSuggestions = (...groups: CorrectiveSuggestion[][]): CorrectiveSuggestion[] => {
   const map = new Map<string, CorrectiveSuggestion>();
   for (const group of groups) {
     for (const suggestion of group) {
-      map.set(suggestion.suggestion_id, suggestion);
+      const key = suggestionFingerprint(suggestion);
+      const existing = map.get(key);
+      if (!existing || shouldReplaceSuggestion(existing, suggestion)) {
+        map.set(key, suggestion);
+      }
     }
   }
   return sortSuggestions(Array.from(map.values())).slice(0, 200);
@@ -332,6 +375,9 @@ export interface IdpsDashboardState {
   engines:      EngineScore[];
   decisions:    AgentDecision[];
   sessions:     SessionSummary[];
+  thresholdHistory: ThresholdHistoryEntry[];
+  explainability: ExplainabilityData | null;
+  pipeline:     PipelineLatest | null;
   logLines:     string[];
   trust:        TrustData | null;
   activities:   WorkflowActivity[];
@@ -352,6 +398,9 @@ const EMPTY: IdpsDashboardState = {
   engines:      [],
   decisions:    [],
   sessions:     [],
+  thresholdHistory: [],
+  explainability: null,
+  pipeline:     null,
   logLines:     [],
   trust:        null,
   activities:   [],
@@ -386,7 +435,7 @@ export const useIdpsDashboard = (selectedDataset = ""): IdpsDashboardState => {
         return;
       }
 
-      const [kpis, alarms, engines, decisions, live, suggestions, sessions, pipeline, trust] =
+      const [kpis, alarms, engines, decisions, live, suggestions, sessions, thresholdHistory, explainability, pipeline, trust] =
         await Promise.allSettled([
           get<KpiData>("/api/kpis", dataset),
           get<AlarmItem[]>("/api/alarms", dataset),
@@ -399,6 +448,8 @@ export const useIdpsDashboard = (selectedDataset = ""): IdpsDashboardState => {
                 `/api/corrective/suggestions${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ""}`
               ),
           get<SessionSummary[]>("/api/sessions", dataset),
+          get<ThresholdHistoryEntry[]>("/api/threshold-history", dataset),
+          get<ExplainabilityData>("/api/explainability", dataset),
           get<PipelineLatest>("/api/pipeline/latest", dataset),
           get<TrustData>("/api/trust", dataset),
         ]);
@@ -421,6 +472,8 @@ export const useIdpsDashboard = (selectedDataset = ""): IdpsDashboardState => {
         : [];
       const suggestionsVal = suggestions.status  === "fulfilled" ? suggestions.value.suggestions : [];
       const sessVal        = sessions.status     === "fulfilled" ? sessions.value                : [];
+      const thresholdHistoryVal = thresholdHistory.status === "fulfilled" ? thresholdHistory.value : [];
+      const explainabilityVal = explainability.status === "fulfilled" ? explainability.value : null;
       const pipeVal        = pipeline.status     === "fulfilled" ? pipeline.value                : null;
       const trustVal       = trust.status        === "fulfilled" ? trust.value                   : null;
 
@@ -537,6 +590,9 @@ export const useIdpsDashboard = (selectedDataset = ""): IdpsDashboardState => {
           engines:      engVal,
           decisions:    decVal,
           sessions:     sessVal,
+          thresholdHistory: thresholdHistoryVal,
+          explainability: explainabilityVal,
+          pipeline:     pipeVal,
           sessionCount: sessVal.length,
           logsAnalysed: normalizedKpis?.row_count ?? 0,
           threatLevel:  latestSess?.threat_level ?? "NORMAL",

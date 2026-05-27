@@ -8,9 +8,9 @@ import pandas as pd
 
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
-SRC = os.path.join(ROOT, "src")
-if SRC not in sys.path:
-    sys.path.insert(0, SRC)
+ENGINES = os.path.join(ROOT, "ai", "engines")
+if ENGINES not in sys.path:
+    sys.path.insert(0, ENGINES)
 
 from prediction_engine import run_prediction_engine
 
@@ -63,6 +63,29 @@ def _mk_ftp_stor(ts: pd.Timestamp, ip: str) -> dict:
 
 
 class TestPredictionEngine(unittest.TestCase):
+    def test_short_burst_mode_does_not_abort_to_zero(self):
+        base = datetime(2026, 3, 9, 0, 0, 0)
+        rows = []
+
+        # Only 3 minute buckets: too short for the classic forecast mode,
+        # but still rich enough to support burst-aware predictive analysis.
+        username_sets = [
+            [f"u{i}" for i in range(2)],
+            [f"u{i}" for i in range(4)],
+            [f"u{i}" for i in range(12)],
+        ]
+        for m, users in enumerate(username_sets):
+            for j, username in enumerate(users):
+                ip = f"10.0.{m}.{j+1}"
+                rows.append(_mk_ssh_failure(_ts(base, m), ip, username=username))
+
+        df_norm = pd.DataFrame(rows)
+        out = run_prediction_engine(df_norm)
+
+        self.assertEqual(out["analysis_mode"], "short_burst_predictive")
+        self.assertIn("SPRAY_PHASE", out["flags"])
+        self.assertGreater(out["prediction_score"], 0)
+
     def test_botnet_warmup(self):
         base = datetime(2026, 3, 9, 0, 0, 0)
         rows = []

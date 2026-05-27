@@ -1,1206 +1,1411 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-import type { FC } from "react";
-import type {
-  AlarmItem,
-  CorrectiveSuggestion,
-  WorkflowActivity,
-} from "../../../shared/types/idps";
+import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties, FC, ReactNode } from "react";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import type { CorrectiveSuggestion, WorkflowActivity } from "../../../shared/types/idps";
 
-interface AgentMode {
-  mode: string;
+type ModeName = "TRAINING" | "SUGGESTION" | "AUTO";
+type Decision = "APPROVE" | "REJECT" | "MODIFY";
+
+type CorrectiveAgentPanelProps = {
+  suggestions: CorrectiveSuggestion[];
+  activities: WorkflowActivity[];
+  alarms: Array<{ source_ip?: string; type?: string; timestamp?: string }>;
+  wsConnected: boolean;
+  selectedDataset: string;
+};
+
+type ModeResponse = {
+  mode: ModeName;
   confidence_threshold: number;
   phase_description: string;
   pending_count: number;
-}
+};
 
-interface SessionStats {
+type SessionStats = {
   total: number;
   pending: number;
   approved: number;
   rejected: number;
   modified: number;
   avg_confidence: number;
-}
+};
 
-interface Stats extends SessionStats {
+type MemoryStats = {
+  corrections_apprises?: number;
+  bonnes_actions?: number;
+  faux_positifs?: number;
+  success_rates?: Record<string, number>;
+  dataset_id?: string;
+  analysis_only?: boolean;
+  reason?: string;
+  error?: string;
+};
+
+type StatsResponse = {
   session: SessionStats;
-  memory?: Record<string, unknown>;
-}
+  memory: MemoryStats;
+};
 
-interface Props {
-  suggestions: CorrectiveSuggestion[];
-  activities: WorkflowActivity[];
-  alarms: AlarmItem[];
-  wsConnected: boolean;
-  selectedDataset: string;
-}
+type SuggestionOverride = Partial<Pick<CorrectiveSuggestion, "status" | "command" | "admin_note">>;
+type Status = CorrectiveSuggestion["status"];
 
-interface TraceStep {
+type TraceStep = {
   key: string;
   label: string;
   detail: string;
   timestamp?: string;
   state: "done" | "active" | "waiting" | "skipped";
-}
-
-interface TraceItem {
-  suggestion: CorrectiveSuggestion;
-  steps: TraceStep[];
-}
-
-const normalizeStats = (stats: Stats): Stats => ({
-  ...stats,
-  ...stats.session,
-});
-
-const PHASE_COLORS: Record<string, { bg: string; border: string; badge: string }> = {
-  TRAINING: { bg: "#0d1f2d", border: "#1e4d6b", badge: "#1a6fa8" },
-  SUGGESTION: { bg: "#1a1a0d", border: "#4d4a1e", badge: "#8a7a1a" },
-  AUTO: { bg: "#0d1f0d", border: "#1e4d1e", badge: "#2a8a2a" },
 };
 
-const PHASE_ICONS: Record<string, string> = {
-  TRAINING: "TRAIN",
-  SUGGESTION: "SUGG",
-  AUTO: "AUTO",
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+const EMPTY_MODE: ModeResponse = {
+  mode: "SUGGESTION",
+  confidence_threshold: 0.85,
+  phase_description:
+    "Les actions a haute confiance sont proposees pour validation humaine. L'agent apprend de chaque decision.",
+  pending_count: 0,
 };
 
-const STATUS_STYLES: Record<string, { bg: string; border: string; color: string }> = {
-  PENDING: { bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", color: "#f59e0b" },
-  APPROVED: { bg: "rgba(34,197,94,0.12)", border: "rgba(34,197,94,0.3)", color: "#22c55e" },
-  REJECTED: { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.3)", color: "#ef4444" },
-  MODIFIED: { bg: "rgba(59,130,246,0.12)", border: "rgba(59,130,246,0.3)", color: "#60a5fa" },
+const EMPTY_STATS: StatsResponse = {
+  session: {
+    total: 0,
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+    modified: 0,
+    avg_confidence: 0,
+  },
+  memory: {},
 };
 
-const TRACE_STATE_STYLES: Record<TraceStep["state"], { dot: string; line: string; text: string }> = {
-  done: { dot: "#22c55e", line: "rgba(34,197,94,0.4)", text: "#e2e8f0" },
-  active: { dot: "#f59e0b", line: "rgba(245,158,11,0.35)", text: "#f8fafc" },
-  waiting: { dot: "#475569", line: "rgba(71,85,105,0.5)", text: "#94a3b8" },
-  skipped: { dot: "#64748b", line: "rgba(100,116,139,0.35)", text: "#64748b" },
+const pageShell: CSSProperties = {
+  minHeight: "100vh",
+  background: "linear-gradient(135deg, rgba(2,6,23,0.98), rgba(15,23,42,0.98) 55%, rgba(2,6,23,0.98))",
+  color: "#f8fafc",
+  borderRadius: 24,
 };
 
-const CONFIDENCE_COLOR = (c: number): string => {
-  if (c >= 0.85) return "#22c55e";
-  if (c >= 0.65) return "#f59e0b";
-  return "#ef4444";
+const pageInner: CSSProperties = {
+  maxWidth: 1280,
+  margin: "0 auto",
+  padding: 24,
+  display: "grid",
+  gap: 24,
 };
 
-const SEVERITY_COLOR = (s: string): string => {
-  if (s === "CRITICAL" || s === "CRITIQUE") return "#ef4444";
-  if (s === "HIGH") return "#f97316";
-  return "#f59e0b";
+const cardStyle: CSSProperties = {
+  border: "1px solid rgba(51,65,85,0.92)",
+  background: "rgba(15,23,42,0.40)",
+  backdropFilter: "blur(14px)",
+  borderRadius: 18,
+  boxShadow: "0 18px 44px rgba(0,0,0,0.24)",
 };
 
-const sortSuggestions = (items: CorrectiveSuggestion[]): CorrectiveSuggestion[] =>
-  items.slice().sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-const formatTime = (value?: string): string => {
-  if (!value) return "Pending";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const headerTitle: CSSProperties = {
+  fontSize: 28,
+  fontWeight: 600,
+  letterSpacing: "-0.02em",
+  color: "#f8fafc",
 };
 
-const formatDateTime = (value?: string): string => {
-  if (!value) return "Pending";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleString([], {
-        month: "short",
-        day: "2-digit",
+const mutedText: CSSProperties = {
+  color: "#94a3b8",
+  fontSize: 12,
+};
+
+const separatorStyle: CSSProperties = {
+  height: 1,
+  background: "rgba(51,65,85,0.9)",
+};
+
+const authHeaders = (): Record<string, string> => {
+  const token = localStorage.getItem("token") ?? "";
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
+const withDatasetQuery = (path: string, dataset: string): string => {
+  if (!dataset) return path;
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}dataset=${encodeURIComponent(dataset)}`;
+};
+
+const formatPercent = (value: number | null | undefined): string => {
+  if (value == null || Number.isNaN(value)) return "--";
+  return `${Math.round(value * 100)}%`;
+};
+
+const formatClock = (iso?: string): string =>
+  iso
+    ? new Date(iso).toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
-        second: "2-digit",
-      });
+      })
+    : "--";
+
+const formatRelative = (iso?: string): string => {
+  if (!iso) return "--";
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return `il y a ${Math.round(diff)}s`;
+  if (diff < 3600) return `il y a ${Math.round(diff / 60)}m`;
+  return `il y a ${Math.round(diff / 3600)}h`;
 };
 
-const statusLabel = (status: CorrectiveSuggestion["status"]): string => ({
-  PENDING: "Awaiting review",
-  APPROVED: "Approved",
-  REJECTED: "Rejected",
-  MODIFIED: "Modified + executed",
-}[status]);
-
-const matchesAlarmToSuggestion = (alarm: AlarmItem, suggestion: CorrectiveSuggestion): boolean => {
-  const sameIp = String(alarm.source_ip ?? "").trim() === String(suggestion.ip ?? "").trim();
-  if (!sameIp) return false;
-
-  const alarmType = String(alarm.type ?? "").toUpperCase();
-  const anomalyType = String(suggestion.anomaly_type ?? "").toUpperCase();
-  return !anomalyType || alarmType.includes(anomalyType) || anomalyType.includes(alarmType);
+const normalizeSeverity = (value?: string): "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" => {
+  const severity = String(value ?? "").toUpperCase();
+  if (severity === "CRITICAL") return "CRITICAL";
+  if (severity === "HIGH") return "HIGH";
+  if (severity === "LOW") return "LOW";
+  return "MEDIUM";
 };
 
-const buildLifecycleTrace = (
+const severityTone = (severity?: string): { border: string; background: string; color: string } => {
+  switch (normalizeSeverity(severity)) {
+    case "CRITICAL":
+      return { border: "rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.1)", color: "#fca5a5" };
+    case "HIGH":
+      return { border: "rgba(249,115,22,0.4)", background: "rgba(249,115,22,0.1)", color: "#fdba74" };
+    case "LOW":
+      return { border: "rgba(56,189,248,0.4)", background: "rgba(56,189,248,0.1)", color: "#7dd3fc" };
+    default:
+      return { border: "rgba(245,158,11,0.4)", background: "rgba(245,158,11,0.1)", color: "#fcd34d" };
+  }
+};
+
+const statusLabel = (status: Status): string => {
+  if (status === "APPROVED") return "Approuvee";
+  if (status === "REJECTED") return "Rejetee";
+  if (status === "MODIFIED") return "Modifiee";
+  return "En attente";
+};
+
+const statusTone = (status: Status): { border: string; background: string; color: string } => {
+  if (status === "APPROVED") {
+    return { border: "rgba(16,185,129,0.4)", background: "rgba(16,185,129,0.1)", color: "#86efac" };
+  }
+  if (status === "REJECTED") {
+    return { border: "rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.1)", color: "#fca5a5" };
+  }
+  if (status === "MODIFIED") {
+    return { border: "rgba(14,165,233,0.4)", background: "rgba(14,165,233,0.1)", color: "#7dd3fc" };
+  }
+  return { border: "rgba(245,158,11,0.4)", background: "rgba(245,158,11,0.1)", color: "#fcd34d" };
+};
+
+const confidenceColor = (value: number): string => {
+  if (value >= 0.85) return "#4ade80";
+  if (value >= 0.65) return "#fcd34d";
+  return "#f87171";
+};
+
+const modeMeta: Record<ModeName, { label: string; glyph: string; tint: string }> = {
+  TRAINING: { label: "Apprentissage", glyph: "B", tint: "#7dd3fc" },
+  SUGGESTION: { label: "Suggestion", glyph: "S", tint: "#fcd34d" },
+  AUTO: { label: "Automatique", glyph: "A", tint: "#86efac" },
+};
+
+const isCorrectiveActivity = (activity: WorkflowActivity): boolean =>
+  String(activity.stage ?? "").toLowerCase() === "corrective" ||
+  String(activity.event_type ?? "").toLowerCase().includes("corrective");
+
+const matchingActivityCount = (activities: WorkflowActivity[], suggestion: CorrectiveSuggestion): number =>
+  activities.filter((activity) => {
+    const meta = activity.meta ?? {};
+    return (
+      meta.suggestion_id === suggestion.suggestion_id ||
+      meta.ip === suggestion.ip ||
+      meta.action_type === suggestion.action_type
+    );
+  }).length;
+
+const buildSteps = (
   suggestion: CorrectiveSuggestion,
   activities: WorkflowActivity[],
-  alarms: AlarmItem[],
-): TraceItem => {
-  const relatedActivities = activities
-    .filter(activity => String(activity.meta?.suggestion_id ?? "") === suggestion.suggestion_id)
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-  const suggestionActivity = relatedActivities.find(activity =>
-    String(activity.title ?? "").toLowerCase().includes("queued")
-  );
-  const decisionActivity = relatedActivities.find(activity => {
-    const title = String(activity.title ?? "").toLowerCase();
-    return title.includes("approved") || title.includes("rejected") || title.includes("modified");
-  });
-  const learningActivity = relatedActivities.find(activity =>
-    String(activity.title ?? "").toLowerCase().includes("learning updated")
-  );
-
-  const detectionAlarm = alarms
-    .filter(alarm => matchesAlarmToSuggestion(alarm, suggestion))
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
-
-  const reviewDetail = suggestion.status === "PENDING"
-    ? "Waiting for an administrator decision."
-    : suggestion.status === "APPROVED"
-      ? "Administrator approved the proposed remediation."
-      : suggestion.status === "REJECTED"
-        ? "Administrator rejected the proposed remediation."
-        : "Administrator adjusted the command before execution.";
-
-  const executeDetail = suggestion.status === "APPROVED" || suggestion.status === "MODIFIED"
-    ? decisionActivity?.detail || `Command executed: ${suggestion.command ?? "n/a"}`
-    : suggestion.status === "REJECTED"
-      ? "Execution skipped because the suggestion was rejected."
-      : "Execution will occur only after approval.";
-
-  return {
-    suggestion,
-    steps: [
-      {
-        key: "detect",
-        label: "Detect",
-        state: "done",
-        timestamp: detectionAlarm?.timestamp || suggestion.timestamp,
-        detail: detectionAlarm?.message || `Anomaly ${suggestion.anomaly_type} observed on ${suggestion.ip}.`,
-      },
-      {
-        key: "suggest",
-        label: "Suggest",
-        state: "done",
-        timestamp: suggestionActivity?.timestamp || suggestion.timestamp,
-        detail: `${suggestion.action_type} proposed at ${(suggestion.confidence * 100).toFixed(0)}% confidence.`,
-      },
-      {
-        key: "review",
-        label: "Review",
-        state: suggestion.status === "PENDING" ? "active" : "done",
-        timestamp: decisionActivity?.timestamp,
-        detail: reviewDetail,
-      },
-      {
-        key: "execute",
-        label: "Execute",
-        state:
-          suggestion.status === "APPROVED" || suggestion.status === "MODIFIED"
-            ? "done"
-            : suggestion.status === "REJECTED"
-              ? "skipped"
-              : "waiting",
-        timestamp:
-          suggestion.status === "APPROVED" || suggestion.status === "MODIFIED"
-            ? decisionActivity?.timestamp
-            : undefined,
-        detail: executeDetail,
-      },
-      {
-        key: "learn",
-        label: "Learn",
-        state:
-          learningActivity
-            ? "done"
-            : suggestion.status === "PENDING"
-              ? "waiting"
-              : "active",
-        timestamp: learningActivity?.timestamp,
-        detail:
-          learningActivity?.detail ||
-          (suggestion.status === "PENDING"
-            ? "Learning is recorded after a decision is made."
-            : "Feedback captured and waiting to appear in corrective memory trace."),
-      },
-    ],
-  };
+  memory: MemoryStats,
+): TraceStep[] => {
+  const decided = suggestion.status !== "PENDING";
+  const relatedActivities = matchingActivityCount(activities, suggestion);
+  return [
+    {
+      key: "detect",
+      label: "Detection",
+      state: "done",
+      timestamp: suggestion.timestamp,
+      detail: `Anomalie ${suggestion.anomaly_type} observee sur ${suggestion.ip}.`,
+    },
+    {
+      key: "suggest",
+      label: "Suggestion",
+      state: "done",
+      timestamp: suggestion.timestamp,
+      detail: `${suggestion.action_type} proposee a ${formatPercent(suggestion.confidence)} de confiance.`,
+    },
+    {
+      key: "review",
+      label: "Revue admin",
+      state: decided ? "done" : "active",
+      detail: decided ? `Decision: ${statusLabel(suggestion.status)}.` : "En attente d'une decision administrateur.",
+    },
+    {
+      key: "execute",
+      label: "Execution",
+      state:
+        suggestion.status === "APPROVED" || suggestion.status === "MODIFIED"
+          ? "done"
+          : suggestion.status === "REJECTED"
+            ? "skipped"
+            : "waiting",
+      detail:
+        suggestion.status === "APPROVED" || suggestion.status === "MODIFIED"
+          ? `Commande executee: ${suggestion.command ?? "n/a"}`
+          : suggestion.status === "REJECTED"
+            ? "Execution annulee car la suggestion a ete rejetee."
+            : "L'execution demarre des l'approbation.",
+    },
+    {
+      key: "learn",
+      label: "Apprentissage",
+      state: decided ? "done" : "waiting",
+      detail: decided
+        ? `Feedback integre au moteur correctif. Traces backend reliees: ${relatedActivities}. Corrections apprises: ${memory.corrections_apprises ?? 0}.`
+        : "L'apprentissage est mis a jour apres la decision.",
+    },
+  ];
 };
 
-export const CorrectiveAgentPanel: FC<Props> = ({
+const applyOverrides = (
+  suggestions: CorrectiveSuggestion[],
+  overrides: Record<string, SuggestionOverride>,
+): CorrectiveSuggestion[] =>
+  suggestions.map((suggestion) => ({
+    ...suggestion,
+    ...overrides[suggestion.suggestion_id],
+  }));
+
+export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
   suggestions,
   activities,
   alarms,
   wsConnected,
   selectedDataset,
 }) => {
-  const [agentMode, setAgentMode] = useState<AgentMode | null>(null);
-  const [stats, setStats] = useState<Stats | null>(null);
+  const [mode, setMode] = useState<ModeResponse>(EMPTY_MODE);
+  const [stats, setStats] = useState<StatsResponse>(EMPTY_STATS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modifiedCmd, setModifiedCmd] = useState("");
   const [adminNote, setAdminNote] = useState("");
-  const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [newMode, setNewMode] = useState("");
-  const [newThreshold, setNewThreshold] = useState("");
-  const [localStats, setLocalStats] = useState<Stats | null>(null);
-  const [suggestionOverrides, setSuggestionOverrides] = useState<Record<string, Partial<CorrectiveSuggestion>>>({});
+  const [feedbackTone, setFeedbackTone] = useState<"ok" | "warn">("ok");
+  const [newMode, setNewMode] = useState<ModeName>("SUGGESTION");
+  const [newThreshold, setNewThreshold] = useState("0.85");
+  const [loadingMeta, setLoadingMeta] = useState(true);
+  const [savingMode, setSavingMode] = useState(false);
+  const [savingDecision, setSavingDecision] = useState(false);
+  const [metaError, setMetaError] = useState<string | null>(null);
+  const [overrides, setOverrides] = useState<Record<string, SuggestionOverride>>({});
+  const [refreshToken, setRefreshToken] = useState(0);
 
-  const token = localStorage.getItem("access_token") || localStorage.getItem("token") || "";
-  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+  const correctiveActivities = useMemo(
+    () => activities.filter(isCorrectiveActivity),
+    [activities],
+  );
 
-  const fetchMeta = useCallback(async () => {
+  const mergedSuggestions = useMemo(
+    () =>
+      applyOverrides(
+        suggestions.slice().sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
+        overrides,
+      ),
+    [overrides, suggestions],
+  );
+
+  const pending = useMemo(
+    () => mergedSuggestions.filter((suggestion) => suggestion.status === "PENDING"),
+    [mergedSuggestions],
+  );
+
+  const completed = useMemo(
+    () => mergedSuggestions.filter((suggestion) => suggestion.status !== "PENDING"),
+    [mergedSuggestions],
+  );
+
+  const selected = useMemo(
+    () => mergedSuggestions.find((suggestion) => suggestion.suggestion_id === selectedId) ?? null,
+    [mergedSuggestions, selectedId],
+  );
+
+  const selectedPending = selected && selected.status === "PENDING" ? selected : null;
+
+  const displayedStats = useMemo(() => {
+    if (stats.session.total > 0 || mergedSuggestions.length === 0) return stats.session;
+
+    const approved = mergedSuggestions.filter((suggestion) => suggestion.status === "APPROVED").length;
+    const rejected = mergedSuggestions.filter((suggestion) => suggestion.status === "REJECTED").length;
+    const modified = mergedSuggestions.filter((suggestion) => suggestion.status === "MODIFIED").length;
+    const avg = mergedSuggestions.reduce((sum, suggestion) => sum + (suggestion.confidence ?? 0), 0) / Math.max(mergedSuggestions.length, 1);
+
+    return {
+      total: mergedSuggestions.length,
+      pending: pending.length,
+      approved,
+      rejected,
+      modified,
+      avg_confidence: avg,
+    };
+  }, [mergedSuggestions, pending.length, stats.session]);
+
+  const lifecycleSource = selectedPending ?? pending[0] ?? completed[0] ?? null;
+  const lifecycleSteps = useMemo(
+    () => (lifecycleSource ? buildSteps(lifecycleSource, correctiveActivities, stats.memory) : []),
+    [correctiveActivities, lifecycleSource, stats.memory],
+  );
+
+  const refreshStats = async (): Promise<void> => {
     try {
-      const statsQuery = selectedDataset ? `?dataset=${encodeURIComponent(selectedDataset)}` : "";
-      const [modeRes, statRes] = await Promise.all([
-        fetch(`${API_BASE}/api/corrective/mode`, { headers }),
-        fetch(`${API_BASE}/api/corrective/stats${statsQuery}`, { headers }),
-      ]);
-      if (modeRes.ok) {
-        setAgentMode(await modeRes.json());
-      }
-      if (statRes.ok) {
-        const statData = await statRes.json();
-        setStats(normalizeStats(statData));
-      }
-    } catch (err) {
-      console.error("[CorrectiveAgentPanel] fetch error:", err);
+      const response = await fetch(withDatasetQuery(`${API_BASE}/api/corrective/stats`, selectedDataset), {
+        headers: authHeaders(),
+      });
+      if (!response.ok) throw new Error(`stats ${response.status}`);
+      const payload = (await response.json()) as StatsResponse;
+      setStats(payload);
+    } catch (error) {
+      console.error("[CorrectiveAgentPanel] stats refresh failed", error);
     }
-  }, [selectedDataset, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  };
+
+  const showFeedback = (message: string, tone: "ok" | "warn") => {
+    setFeedback(message);
+    setFeedbackTone(tone);
+    window.setTimeout(() => {
+      setFeedback((current) => (current === message ? null : current));
+    }, 3500);
+  };
 
   useEffect(() => {
-    fetchMeta();
-    const id = setInterval(fetchMeta, 15_000);
-    return () => clearInterval(id);
-  }, [fetchMeta]);
-
-  useEffect(() => {
-    if (stats) setLocalStats(stats);
-  }, [stats]);
-
-  useEffect(() => {
+    setOverrides({});
     setSelectedId(null);
-    setModifiedCmd("");
     setAdminNote("");
-    setSuggestionOverrides({});
+    setFeedback(null);
   }, [selectedDataset]);
 
   useEffect(() => {
-    setSuggestionOverrides(prev => {
-      const next = { ...prev };
-      let changed = false;
-
-      for (const suggestion of suggestions) {
-        const override = next[suggestion.suggestion_id];
-        if (!override) continue;
-
-        const sameStatus = !override.status || override.status === suggestion.status;
-        const sameCommand = !override.command || override.command === suggestion.command;
-        const sameNote = !override.admin_note || override.admin_note === suggestion.admin_note;
-
-        if (sameStatus && sameCommand && sameNote) {
-          delete next[suggestion.suggestion_id];
-          changed = true;
-        }
-      }
-
-      return changed ? next : prev;
-    });
-  }, [suggestions]);
-
-  const suggestionHistory = useMemo(() => {
-    const merged = suggestions.map(suggestion => ({
-      ...suggestion,
-      ...(suggestionOverrides[suggestion.suggestion_id] ?? {}),
-    }));
-    return sortSuggestions(merged);
-  }, [suggestions, suggestionOverrides]);
-
-  const pending = useMemo(
-    () => suggestionHistory.filter(suggestion => suggestion.status === "PENDING"),
-    [suggestionHistory],
-  );
-
-  const completedSuggestions = useMemo(
-    () => suggestionHistory.filter(suggestion => suggestion.status !== "PENDING"),
-    [suggestionHistory],
-  );
-
-  const selectedSuggestion = suggestionHistory.find(suggestion => suggestion.suggestion_id === selectedId) ?? null;
-  const selectedPendingSuggestion = selectedSuggestion?.status === "PENDING" ? selectedSuggestion : null;
-
-  const lifecycleSourceSuggestions = useMemo(() => {
-    if (selectedPendingSuggestion) {
-      return [selectedPendingSuggestion];
-    }
-    return pending.slice(0, 6);
-  }, [pending, selectedPendingSuggestion]);
-
-  const lifecycleTraces = useMemo(
-    () => lifecycleSourceSuggestions.map(suggestion => buildLifecycleTrace(suggestion, activities, alarms)),
-    [activities, alarms, lifecycleSourceSuggestions],
-  );
+    if (selected) return;
+    const next = pending[0] ?? mergedSuggestions[0] ?? null;
+    setSelectedId(next?.suggestion_id ?? null);
+    setModifiedCmd(next?.command ?? "");
+  }, [mergedSuggestions, pending, selected]);
 
   useEffect(() => {
-    if (!selectedPendingSuggestion) {
-      setSelectedId(null);
+    if (!selected) {
       setModifiedCmd("");
       setAdminNote("");
+      return;
     }
-  }, [selectedPendingSuggestion]);
+    setModifiedCmd(selected.command ?? "");
+  }, [selected]);
 
-  const validate = async (decision: "APPROVE" | "REJECT" | "MODIFY") => {
-    if (!selectedPendingSuggestion) return;
+  useEffect(() => {
+    let mounted = true;
 
-    setLoading(true);
+    const loadMeta = async () => {
+      setLoadingMeta(true);
+      setMetaError(null);
+      try {
+        const [modeRes, statsRes] = await Promise.all([
+          fetch(`${API_BASE}/api/corrective/mode`, { headers: authHeaders() }),
+          fetch(withDatasetQuery(`${API_BASE}/api/corrective/stats`, selectedDataset), {
+            headers: authHeaders(),
+          }),
+        ]);
+
+        if (!modeRes.ok) throw new Error(`mode ${modeRes.status}`);
+        if (!statsRes.ok) throw new Error(`stats ${statsRes.status}`);
+
+        const [modeJson, statsJson] = await Promise.all([
+          modeRes.json() as Promise<ModeResponse>,
+          statsRes.json() as Promise<StatsResponse>,
+        ]);
+
+        if (!mounted) return;
+        setMode(modeJson);
+        setStats(statsJson);
+        setNewMode(modeJson.mode);
+        setNewThreshold(String(modeJson.confidence_threshold ?? 0.85));
+      } catch (error) {
+        if (!mounted) return;
+        console.error("[CorrectiveAgentPanel] metadata load failed", error);
+        setMetaError("Impossible de charger les metadonnees correctives pour le moment.");
+      } finally {
+        if (mounted) setLoadingMeta(false);
+      }
+    };
+
+    void loadMeta();
+    return () => {
+      mounted = false;
+    };
+  }, [refreshToken, selectedDataset]);
+
+  const applyMode = async () => {
+    setSavingMode(true);
     try {
-      const res = await fetch(`${API_BASE}/api/corrective/validate`, {
+      const threshold = Number(newThreshold);
+      const payload = {
+        new_mode: newMode,
+        new_threshold: Number.isFinite(threshold) ? threshold : mode.confidence_threshold,
+      };
+
+      const response = await fetch(`${API_BASE}/api/corrective/mode`, {
         method: "POST",
-        headers,
-        body: JSON.stringify({
-          suggestion_id: selectedPendingSuggestion.suggestion_id,
-          decision,
-          modified_command: decision === "MODIFY" ? modifiedCmd : undefined,
-          admin_note: adminNote || undefined,
-        }),
+        headers: authHeaders(),
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(String(data?.detail ?? data?.message ?? response.status));
+      }
 
-      const optimisticStatus: CorrectiveSuggestion["status"] =
-        decision === "APPROVE" ? "APPROVED" : decision === "REJECT" ? "REJECTED" : "MODIFIED";
+      setMode((current) => ({
+        ...current,
+        mode: newMode,
+        confidence_threshold: payload.new_threshold,
+      }));
+      showFeedback(String(data?.message ?? "Mode change enregistre."), "ok");
+      await refreshStats();
+    } catch (error) {
+      console.error("[CorrectiveAgentPanel] mode update failed", error);
+      showFeedback("Impossible de modifier le mode correctif.", "warn");
+    } finally {
+      setSavingMode(false);
+    }
+  };
 
-      setSuggestionOverrides(prev => ({
-        ...prev,
-        [selectedPendingSuggestion.suggestion_id]: {
-          status: optimisticStatus,
-          command: decision === "MODIFY" ? modifiedCmd : selectedPendingSuggestion.command,
-          admin_note: adminNote || undefined,
+  const decide = async (decision: Decision) => {
+    if (!selectedPending) return;
+
+    setSavingDecision(true);
+    try {
+      const payload: Record<string, unknown> = {
+        suggestion_id: selectedPending.suggestion_id,
+        decision,
+      };
+      if (adminNote.trim()) payload.admin_note = adminNote.trim();
+      if (decision === "MODIFY") payload.modified_command = modifiedCmd.trim();
+
+      const response = await fetch(`${API_BASE}/api/corrective/validate`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(String(data?.detail ?? data?.message ?? response.status));
+      }
+
+      setOverrides((current) => ({
+        ...current,
+        [selectedPending.suggestion_id]: {
+          status: decision === "APPROVE" ? "APPROVED" : decision === "REJECT" ? "REJECTED" : "MODIFIED",
+          command: decision === "MODIFY" ? modifiedCmd.trim() : selectedPending.command,
+          admin_note: adminNote.trim() || selectedPending.admin_note,
         },
       }));
 
-      setFeedback(`${data.status} - ${data.message}`);
-      setLocalStats(prev => {
-        if (!prev) return prev;
-
-        const delta = {
-          APPROVE: { approved: 1, pending: -1, rejected: 0, modified: 0 },
-          REJECT: { approved: 0, pending: -1, rejected: 1, modified: 0 },
-          MODIFY: { approved: 0, pending: -1, rejected: 0, modified: 1 },
-        }[decision];
-
-        return {
-          ...prev,
-          pending: prev.pending + delta.pending,
-          approved: prev.approved + delta.approved,
-          rejected: prev.rejected + delta.rejected,
-          modified: prev.modified + delta.modified,
-          session: {
-            ...prev.session,
-            pending: prev.session.pending + delta.pending,
-            approved: prev.session.approved + delta.approved,
-            rejected: prev.session.rejected + delta.rejected,
-            modified: prev.session.modified + delta.modified,
-          },
-        };
-      });
-
       setSelectedId(null);
-      setModifiedCmd("");
       setAdminNote("");
-      fetchMeta();
-    } catch {
-      setFeedback("Erreur reseau - verifiez le backend.");
+      showFeedback(String(data?.message ?? "Decision enregistree."), "ok");
+      await refreshStats();
+    } catch (error) {
+      console.error("[CorrectiveAgentPanel] validation failed", error);
+      showFeedback("Impossible de valider cette suggestion.", "warn");
     } finally {
-      setLoading(false);
-      setTimeout(() => setFeedback(null), 5000);
+      setSavingDecision(false);
     }
   };
-
-  const changeMode = async () => {
-    if (!newMode) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/corrective/mode`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          new_mode: newMode,
-          new_threshold: newThreshold ? parseFloat(newThreshold) : undefined,
-        }),
-      });
-      const data = await res.json();
-      setFeedback(`Mode change -> ${data.new_mode}`);
-      fetchMeta();
-    } catch {
-      setFeedback("Erreur changement de mode.");
-    } finally {
-      setLoading(false);
-      setTimeout(() => setFeedback(null), 5000);
-    }
-  };
-
-  const triggerDemo = async () => {
-    if (!selectedDataset) {
-      setFeedback("Selectionnez un dataset avant de lancer la demo.");
-      setTimeout(() => setFeedback(null), 5000);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      let switchedToSuggestion = false;
-
-      if (agentMode?.mode !== "SUGGESTION") {
-        const modeRes = await fetch(`${API_BASE}/api/corrective/mode`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ new_mode: "SUGGESTION" }),
-        });
-        const modeData = await modeRes.json().catch(() => ({}));
-        if (!modeRes.ok) {
-          throw new Error(modeData?.detail || modeData?.message || "Impossible d'activer le mode SUGGESTION.");
-        }
-        switchedToSuggestion = true;
-      }
-
-      const res = await fetch(`${API_BASE}/api/corrective/demo-trigger`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ dataset_id: selectedDataset }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.detail || data?.message || "Erreur pendant le declenchement de la demo.");
-      }
-
-      setFeedback(
-        switchedToSuggestion
-          ? "Demo injectee - le mode SUGGESTION a ete active pour afficher une recommandation visible."
-          : "Demo injectee - l'alarme et la suggestion vont apparaitre dans le dashboard.",
-      );
-      fetchMeta();
-    } catch (err) {
-      setFeedback(err instanceof Error ? err.message : "Erreur pendant le declenchement de la demo.");
-    } finally {
-      setLoading(false);
-      setTimeout(() => setFeedback(null), 5000);
-    }
-  };
-
-  const colors = PHASE_COLORS[agentMode?.mode ?? "SUGGESTION"];
-  const modeKey = agentMode?.mode ?? "SUGGESTION";
 
   return (
-    <div
-      style={{
-        fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-        background: "#0a0e1a",
-        color: "#c9d1e0",
-        padding: "20px",
-        borderRadius: 10,
-        border: "1px solid rgba(255,255,255,0.07)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-        <div
-          style={{
-            width: 9,
-            height: 9,
-            borderRadius: "50%",
-            background: modeKey === "AUTO" ? "#22c55e" : modeKey === "SUGGESTION" ? "#f59e0b" : "#3b82f6",
-            boxShadow: `0 0 8px ${modeKey === "AUTO" ? "#22c55e" : "#f59e0b"}`,
-            animation: "pulse 2s infinite",
-            flexShrink: 0,
-          }}
-        />
-        <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 2, color: "#e2e8f0" }}>
-          CORRECTIVE AGENT
-        </span>
-
-        <span
-          style={{
-            fontSize: 9,
-            padding: "2px 7px",
-            borderRadius: 20,
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            background: wsConnected ? "rgba(29,158,117,0.1)" : "rgba(226,75,74,0.1)",
-            color: wsConnected ? "#1D9E75" : "#E24B4A",
-            border: `1px solid ${wsConnected ? "rgba(29,158,117,0.25)" : "rgba(226,75,74,0.25)"}`,
-          }}
-        >
-          <span
-            style={{
-              width: 5,
-              height: 5,
-              borderRadius: "50%",
-              background: wsConnected ? "#1D9E75" : "#E24B4A",
-              animation: wsConnected ? "ws-pulse 2s infinite" : "none",
-            }}
-          />
-          {wsConnected ? "WS active" : "WS offline"}
-        </span>
-
-        <span
-          style={{
-            marginLeft: "auto",
-            padding: "3px 10px",
-            borderRadius: 4,
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: 1.5,
-            background: colors?.badge ?? "#1a6fa8",
-            color: "#fff",
-          }}
-        >
-          {PHASE_ICONS[modeKey]} {modeKey}
-        </span>
-      </div>
-
-      {feedback && (
-        <div
-          style={{
-            padding: "10px 16px",
-            borderRadius: 6,
-            marginBottom: 14,
-            background:
-              feedback.includes("EXECUTED") ||
-              feedback.includes("Mode change") ||
-              feedback.includes("Demo injectee")
-                ? "#14532d"
-                : "#450a0a",
-            border: `1px solid ${
-              feedback.includes("EXECUTED") ||
-              feedback.includes("Mode change") ||
-              feedback.includes("Demo injectee")
-                ? "#22c55e"
-                : "#ef4444"
-            }`,
-            fontSize: 12,
-            color: "#e2e8f0",
-          }}
-        >
-          {feedback}
-        </div>
-      )}
-
-      {agentMode && (
-        <div
-          style={{
-            padding: "14px 18px",
-            borderRadius: 8,
-            marginBottom: 16,
-            background: colors?.bg ?? "#0d1f2d",
-            border: `1px solid ${colors?.border ?? "#1e4d6b"}`,
-          }}
-        >
-          <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 1.5, marginBottom: 6 }}>
-            PHASE ACTIVE
-          </div>
-          <div style={{ fontSize: 12, color: "#e2e8f0", marginBottom: 10 }}>{agentMode.phase_description}</div>
-          <div style={{ display: "flex", gap: 20, fontSize: 11, color: "#94a3b8" }}>
-            <span>
-              Auto threshold: <strong style={{ color: "#e2e8f0" }}>{(agentMode.confidence_threshold * 100).toFixed(0)}%</strong>
-            </span>
-            <span>
-              Pending: <strong style={{ color: pending.length > 0 ? "#f59e0b" : "#22c55e" }}>{pending.length}</strong>
-            </span>
-          </div>
-        </div>
-      )}
-
-      {localStats && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 16 }}>
-          {([
-            { label: "TOTAL", value: localStats.session.total, color: "#64748b" },
-            { label: "PENDING", value: localStats.session.pending, color: "#f59e0b" },
-            { label: "APPROVED", value: localStats.session.approved, color: "#22c55e" },
-            { label: "REJECTED", value: localStats.session.rejected, color: "#ef4444" },
-            {
-              label: "AVG CONF",
-              value: `${((isFinite(localStats.session.avg_confidence) ? localStats.session.avg_confidence : 0) * 100).toFixed(0)}%`,
-              color: CONFIDENCE_COLOR(isFinite(localStats.session.avg_confidence) ? localStats.session.avg_confidence : 0),
-            },
-          ] as { label: string; value: string | number; color: string }[]).map(({ label, value, color }) => (
-            <div
-              key={label}
-              style={{
-                padding: "10px 8px",
-                borderRadius: 6,
-                background: "#0f1623",
-                border: "1px solid #1e293b",
-                textAlign: "center",
-              }}
-            >
-              <div style={{ fontSize: 18, fontWeight: 700, color }}>{value}</div>
-              <div style={{ fontSize: 8, letterSpacing: 1.5, color: "#475569", marginTop: 3 }}>{label}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div
-        style={{
-          padding: "14px 18px",
-          borderRadius: 8,
-          marginBottom: 16,
-          background: "#0f1623",
-          border: "1px solid #1e293b",
-        }}
-      >
-        <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 1.5, marginBottom: 10 }}>CHANGER LE MODE</div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          {(["TRAINING", "SUGGESTION", "AUTO"] as const).map(mode => (
-            <button
-              key={mode}
-              onClick={() => setNewMode(mode)}
-              style={{
-                padding: "5px 12px",
-                borderRadius: 4,
-                cursor: "pointer",
-                fontSize: 11,
-                fontFamily: "inherit",
-                fontWeight: 700,
-                letterSpacing: 1,
-                background: newMode === mode ? PHASE_COLORS[mode].badge : "#1e293b",
-                color: newMode === mode ? "#fff" : "#64748b",
-                border: `1px solid ${newMode === mode ? PHASE_COLORS[mode].badge : "#334155"}`,
-                transition: "all .15s",
-              }}
-            >
-              {PHASE_ICONS[mode]} {mode}
-            </button>
-          ))}
-          <input
-            placeholder="Threshold (0.85)"
-            value={newThreshold}
-            onChange={event => setNewThreshold(event.target.value)}
-            style={{
-              padding: "5px 10px",
-              borderRadius: 4,
-              background: "#1e293b",
-              border: "1px solid #334155",
-              color: "#e2e8f0",
-              fontSize: 11,
-              fontFamily: "inherit",
-              outline: "none",
-              width: 130,
-            }}
-          />
-          <button
-            onClick={changeMode}
-            disabled={!newMode || loading}
-            style={{
-              padding: "5px 14px",
-              borderRadius: 4,
-              cursor: newMode ? "pointer" : "default",
-              background: newMode ? "#2563eb" : "#1e293b",
-              color: newMode ? "#fff" : "#475569",
-              border: "none",
-              fontSize: 11,
-              fontFamily: "inherit",
-              fontWeight: 700,
-            }}
-          >
-            Apply
-          </button>
-        </div>
-        <div
-          style={{
-            marginTop: 12,
-            paddingTop: 12,
-            borderTop: "1px solid #1e293b",
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}
-        >
-          <button
-            onClick={triggerDemo}
-            disabled={loading || !selectedDataset}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 4,
-              cursor: loading || !selectedDataset ? "default" : "pointer",
-              background: loading || !selectedDataset ? "#1e293b" : "#7c3aed",
-              color: loading || !selectedDataset ? "#64748b" : "#f8fafc",
-              border: "none",
-              fontSize: 11,
-              fontFamily: "inherit",
-              fontWeight: 700,
-              letterSpacing: 0.8,
-            }}
-          >
-            Lancer une demo visible
-          </button>
-          <span style={{ fontSize: 10, color: "#64748b" }}>
-            Injects a synthetic anomaly into the existing pipeline and lets the system produce a real corrective suggestion.
-          </span>
-        </div>
-      </div>
-
-      <div style={{ marginBottom: 18 }}>
-        <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 1.5, marginBottom: 10 }}>
-          SUGGESTIONS EN ATTENTE ({pending.length})
-        </div>
-
-        {pending.length === 0 ? (
+    <div style={pageShell}>
+      <div style={pageInner}>
+        <header style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div
             style={{
-              padding: "24px",
-              textAlign: "center",
-              color: "#475569",
-              fontSize: 12,
-              background: "#0f1623",
-              borderRadius: 8,
-              border: "1px solid #1e293b",
+              display: "flex",
+              flexDirection: window.innerWidth >= 1024 ? "row" : "column",
+              alignItems: window.innerWidth >= 1024 ? "center" : "flex-start",
+              justifyContent: "space-between",
+              gap: 16,
             }}
           >
-            <div style={{ fontSize: 28, marginBottom: 10 }}>OK</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>
-              No pending suggestion
-            </div>
-            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 12 }}>
-              {agentMode?.mode === "AUTO"
-                ? "AUTO mode handles eligible anomalies automatically. Use the trace below to inspect completed actions."
-                : agentMode?.mode === "TRAINING"
-                  ? "TRAINING mode records examples without opening manual suggestions."
-                  : "The panel is ready. Critical anomalies will appear here with a corrective review flow."}
-            </div>
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {pending.map(suggestion => (
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
               <div
-                key={suggestion.suggestion_id}
-                onClick={() => {
-                  setSelectedId(suggestion.suggestion_id);
-                  setModifiedCmd(suggestion.command ?? "");
-                  setAdminNote("");
-                }}
                 style={{
-                  padding: "12px 16px",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  background: selectedPendingSuggestion?.suggestion_id === suggestion.suggestion_id ? "#1e293b" : "#0f1623",
-                  border: `1px solid ${
-                    selectedPendingSuggestion?.suggestion_id === suggestion.suggestion_id ? "#3b82f6" : "#1e293b"
-                  }`,
-                  transition: "all .15s",
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 14,
+                  position: "relative",
+                  width: 48,
+                  height: 48,
+                  borderRadius: 14,
+                  display: "grid",
+                  placeItems: "center",
+                  background: "linear-gradient(135deg, rgba(99,102,241,0.22), rgba(16,185,129,0.18))",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  color: "#c7d2fe",
+                  fontWeight: 700,
+                  fontSize: 16,
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
                 }}
               >
-                <div style={{ width: 38, textAlign: "center", flexShrink: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: CONFIDENCE_COLOR(suggestion.confidence) }}>
-                    {(suggestion.confidence * 100).toFixed(0)}%
-                  </div>
-                  <div style={{ fontSize: 8, color: "#475569", letterSpacing: 1 }}>CONF.</div>
-                </div>
-
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
-                    <span
-                      style={{
-                        fontSize: 9,
-                        padding: "2px 6px",
-                        borderRadius: 3,
-                        background: `${SEVERITY_COLOR(suggestion.severity)}22`,
-                        color: SEVERITY_COLOR(suggestion.severity),
-                        border: `1px solid ${SEVERITY_COLOR(suggestion.severity)}44`,
-                        fontWeight: 700,
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      {suggestion.severity}
-                    </span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>{suggestion.action_type}</span>
-                    <span style={{ fontSize: 10, color: "#64748b" }}>IP: {suggestion.ip}</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{suggestion.description}</div>
-                  {suggestion.command && (
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: "#60a5fa",
-                        fontFamily: "monospace",
-                        background: "#0a0e1a",
-                        padding: "3px 8px",
-                        borderRadius: 3,
-                        display: "inline-block",
-                        maxWidth: "100%",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      $ {suggestion.command}
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ fontSize: 9, color: "#475569", whiteSpace: "nowrap", flexShrink: 0 }}>
-                  {formatTime(suggestion.timestamp)}
-                </div>
+                AI
+                <span
+                  style={{
+                    position: "absolute",
+                    top: -3,
+                    right: -3,
+                    width: 11,
+                    height: 11,
+                    borderRadius: "50%",
+                    background: "#10b981",
+                    boxShadow: "0 0 0 5px rgba(16,185,129,0.10)",
+                  }}
+                />
               </div>
-            ))}
+              <div>
+                <p style={{ ...mutedText, textTransform: "uppercase", letterSpacing: "0.2em" }}>AI Operations</p>
+                <h1 style={headerTitle}>Corrective Agent</h1>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <Badge
+                tone={wsConnected ? "ok" : "warn"}
+                label={wsConnected ? "Flux temps reel" : "Hors ligne"}
+                prefix={<LiveDot active={wsConnected} />}
+              />
+              <Badge
+                tone="neutral"
+                label={`Mode ${modeMeta[mode.mode].label}`}
+                prefix={<GlyphPill glyph={modeMeta[mode.mode].glyph} color={modeMeta[mode.mode].tint} />}
+              />
+              <button
+                type="button"
+                onClick={() => setRefreshToken((current) => current + 1)}
+                style={{
+                  border: "none",
+                  borderRadius: 12,
+                  padding: "10px 14px",
+                  background: "linear-gradient(135deg, rgba(99,102,241,0.9), rgba(129,140,248,0.92))",
+                  color: "#eef2ff",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Actualiser
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </header>
 
-      {selectedPendingSuggestion && (
-        <div
-          style={{
-            padding: "18px",
-            borderRadius: 8,
-            background: "#0d1f0d",
-            border: "1px solid #1e4d1e",
-            marginBottom: 18,
-          }}
-        >
-          <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 1.5, marginBottom: 12 }}>
-            VALIDATION - <span style={{ color: "#94a3b8" }}>{selectedPendingSuggestion.suggestion_id}</span>
-          </div>
-
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 10, color: "#64748b", marginBottom: 5 }}>COMMANDE (modifiable):</div>
-            <input
-              value={modifiedCmd}
-              onChange={event => setModifiedCmd(event.target.value)}
-              style={{
-                width: "100%",
-                padding: "7px 10px",
-                borderRadius: 4,
-                background: "#0f2010",
-                border: "1px solid #1e4d1e",
-                color: "#86efac",
-                fontSize: 12,
-                fontFamily: "monospace",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 10, color: "#64748b", marginBottom: 5 }}>NOTE ADMIN (optionnel):</div>
-            <input
-              value={adminNote}
-              onChange={event => setAdminNote(event.target.value)}
-              placeholder="Reason for the decision..."
-              style={{
-                width: "100%",
-                padding: "7px 10px",
-                borderRadius: 4,
-                background: "#1e293b",
-                border: "1px solid #334155",
-                color: "#e2e8f0",
-                fontSize: 11,
-                fontFamily: "inherit",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
-          </div>
-
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={() => validate("APPROVE")}
-              disabled={loading}
-              style={{
-                flex: 1,
-                padding: "9px",
-                borderRadius: 4,
-                cursor: "pointer",
-                background: "#166534",
-                border: "1px solid #22c55e",
-                color: "#86efac",
-                fontSize: 12,
-                fontFamily: "inherit",
-                fontWeight: 700,
-              }}
-            >
-              APPROUVER
-            </button>
-            <button
-              onClick={() => validate("MODIFY")}
-              disabled={loading || !modifiedCmd}
-              style={{
-                flex: 1,
-                padding: "9px",
-                borderRadius: 4,
-                cursor: loading || !modifiedCmd ? "default" : "pointer",
-                background: "#1e3a5f",
-                border: "1px solid #3b82f6",
-                color: "#93c5fd",
-                fontSize: 12,
-                fontFamily: "inherit",
-                fontWeight: 700,
-                opacity: !modifiedCmd ? 0.5 : 1,
-              }}
-            >
-              MODIFIER & EXE.
-            </button>
-            <button
-              onClick={() => validate("REJECT")}
-              disabled={loading}
-              style={{
-                flex: 1,
-                padding: "9px",
-                borderRadius: 4,
-                cursor: "pointer",
-                background: "#450a0a",
-                border: "1px solid #ef4444",
-                color: "#fca5a5",
-                fontSize: 12,
-                fontFamily: "inherit",
-                fontWeight: 700,
-              }}
-            >
-              REJETER
-            </button>
-            <button
-              onClick={() => setSelectedId(null)}
-              style={{
-                padding: "9px 14px",
-                borderRadius: 4,
-                cursor: "pointer",
-                background: "#1e293b",
-                border: "1px solid #334155",
-                color: "#64748b",
-                fontSize: 12,
-                fontFamily: "inherit",
-              }}
-            >
-              Annuler
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div style={{ marginBottom: 18 }}>
-        <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 1.5, marginBottom: 10 }}>
-          TRACE CORRECTIVE ({lifecycleTraces.length})
-        </div>
-
-        {lifecycleTraces.length === 0 ? (
+        {feedback && (
           <div
             style={{
-              padding: "20px",
-              borderRadius: 8,
-              background: "#0f1623",
-              border: "1px solid #1e293b",
-              color: "#64748b",
-              fontSize: 12,
+              ...cardStyle,
+              padding: "12px 16px",
+              color: feedbackTone === "ok" ? "#bbf7d0" : "#fde68a",
+              borderColor: feedbackTone === "ok" ? "rgba(16,185,129,0.28)" : "rgba(245,158,11,0.28)",
+              background: feedbackTone === "ok" ? "rgba(16,185,129,0.10)" : "rgba(245,158,11,0.10)",
+              fontSize: 14,
             }}
           >
-            No active corrective review in progress. Completed suggestions remain visible in the history section below.
+            {feedback}
           </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {lifecycleTraces.map(trace => {
-              const statusStyle = STATUS_STYLES[trace.suggestion.status];
+        )}
 
-              return (
-                <div
-                  key={trace.suggestion.suggestion_id}
-                  style={{
-                    padding: "14px 16px",
-                    borderRadius: 10,
-                    background: "#0f1623",
-                    border: "1px solid #1e293b",
-                  }}
-                >
+        {metaError && (
+          <div
+            style={{
+              ...cardStyle,
+              padding: "12px 16px",
+              color: "#fecdd3",
+              borderColor: "rgba(239,68,68,0.28)",
+              background: "rgba(239,68,68,0.08)",
+              fontSize: 14,
+            }}
+          >
+            {metaError}
+          </div>
+        )}
+
+        <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <ResponsiveGrid columns="1fr 2fr">
+            <Card>
+              <CardHeader>
+                <CardDescription>Phase active</CardDescription>
+                <CardTitle>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <GlyphPill glyph={modeMeta[mode.mode].glyph} color={modeMeta[mode.mode].tint} />
+                    {modeMeta[mode.mode].label}
+                  </div>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.65 }}>
+                  {loadingMeta ? "Chargement du contexte correctif..." : mode.phase_description}
+                </div>
+                <div style={{ marginTop: 16, ...separatorStyle }} />
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#94a3b8" }}>
+                    <span>Seuil de confiance automatique</span>
+                    <span style={{ fontFamily: "var(--font-mono)", color: "#e2e8f0" }}>
+                      {formatPercent(mode.confidence_threshold)}
+                    </span>
+                  </div>
                   <div
                     style={{
-                      display: "flex",
-                      gap: 12,
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      flexWrap: "wrap",
-                      marginBottom: 12,
+                      marginTop: 8,
+                      height: 6,
+                      borderRadius: 999,
+                      background: "rgba(51,65,85,0.92)",
+                      overflow: "hidden",
                     }}
                   >
-                    <div>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 5 }}>
-                        <span style={{ color: "#e2e8f0", fontSize: 12, fontWeight: 700 }}>{trace.suggestion.action_type}</span>
-                        <span
-                          style={{
-                            fontSize: 9,
-                            fontWeight: 700,
-                            letterSpacing: 0.6,
-                            padding: "2px 7px",
-                            borderRadius: 999,
-                            background: statusStyle.bg,
-                            color: statusStyle.color,
-                            border: `1px solid ${statusStyle.border}`,
-                          }}
-                        >
-                          {statusLabel(trace.suggestion.status)}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                        {trace.suggestion.anomaly_type} on {trace.suggestion.ip}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: CONFIDENCE_COLOR(trace.suggestion.confidence) }}>
-                        {(trace.suggestion.confidence * 100).toFixed(0)}%
-                      </div>
-                      <div style={{ fontSize: 9, color: "#64748b" }}>{formatDateTime(trace.suggestion.timestamp)}</div>
-                    </div>
+                    <div
+                      style={{
+                        width: `${Math.max(0, Math.min(100, (mode.confidence_threshold ?? 0) * 100))}%`,
+                        height: "100%",
+                        background: "linear-gradient(90deg, rgba(125,211,252,0.95), rgba(99,102,241,0.95))",
+                      }}
+                    />
                   </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                    {trace.steps.map((step, index) => {
-                      const stepStyle = TRACE_STATE_STYLES[step.state];
-                      const isLast = index === trace.steps.length - 1;
-
-                      return (
-                        <div
-                          key={step.key}
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "20px 88px 1fr auto",
-                            gap: 12,
-                            alignItems: "start",
-                            minHeight: 52,
-                          }}
-                        >
-                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", height: "100%" }}>
-                            <span
-                              style={{
-                                width: 10,
-                                height: 10,
-                                borderRadius: "50%",
-                                background: stepStyle.dot,
-                                marginTop: 4,
-                                boxShadow: `0 0 10px ${stepStyle.line}`,
-                              }}
-                            />
-                            {!isLast && (
-                              <span
-                                style={{
-                                  width: 1,
-                                  flex: 1,
-                                  background: stepStyle.line,
-                                  marginTop: 6,
-                                }}
-                              />
-                            )}
-                          </div>
-                          <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 1.1, paddingTop: 1 }}>{step.label.toUpperCase()}</div>
-                          <div>
-                            <div style={{ fontSize: 11, color: stepStyle.text, marginBottom: 3 }}>{step.detail}</div>
-                          </div>
-                          <div style={{ fontSize: 9, color: "#64748b", whiteSpace: "nowrap", paddingTop: 1 }}>
-                            {formatTime(step.timestamp)}
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div style={{ marginTop: 12, color: "#64748b", fontSize: 11, lineHeight: 1.6 }}>
+                    Memoire: {stats.memory.corrections_apprises ?? 0} corrections apprises · {stats.memory.bonnes_actions ?? 0} bonnes actions · {stats.memory.faux_positifs ?? 0} faux positifs
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+              </CardContent>
+            </Card>
 
-      <div>
-        <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 1.5, marginBottom: 10 }}>
-          HISTORIQUE RECENT ({completedSuggestions.length})
-        </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
+              <KpiCard label="Total" value={String(displayedStats.total)} glyph="A" tint="#cbd5e1" />
+              <KpiCard label="En attente" value={String(displayedStats.pending)} glyph="C" tint="#fcd34d" pulse={displayedStats.pending > 0} />
+              <KpiCard label="Approuvees" value={String(displayedStats.approved)} glyph="V" tint="#86efac" />
+              <KpiCard
+                label="Confiance moy."
+                value={formatPercent(displayedStats.avg_confidence)}
+                glyph="%"
+                tint={confidenceColor(displayedStats.avg_confidence)}
+              />
+            </div>
+          </ResponsiveGrid>
 
-        {completedSuggestions.length === 0 ? (
-          <div
-            style={{
-              padding: "18px",
-              borderRadius: 8,
-              background: "#0f1623",
-              border: "1px solid #1e293b",
-              color: "#64748b",
-              fontSize: 12,
-            }}
-          >
-            Completed suggestions will stay visible here for demo traceability.
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {completedSuggestions.slice(0, 12).map(suggestion => {
-              const statusStyle = STATUS_STYLES[suggestion.status];
-              return (
-                <div
-                  key={suggestion.suggestion_id}
-                  style={{
-                    padding: "12px 14px",
-                    borderRadius: 8,
-                    background: "#0f1623",
-                    border: "1px solid #1e293b",
-                    display: "flex",
-                    gap: 12,
-                    alignItems: "flex-start",
-                  }}
-                >
-                  <div style={{ width: 38, textAlign: "center", flexShrink: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: CONFIDENCE_COLOR(suggestion.confidence) }}>
-                      {(suggestion.confidence * 100).toFixed(0)}%
-                    </div>
-                    <div style={{ fontSize: 8, color: "#475569", letterSpacing: 1 }}>CONF.</div>
-                  </div>
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                      <span style={{ fontSize: 12, color: "#e2e8f0", fontWeight: 700 }}>{suggestion.action_type}</span>
-                      <span
+          <Card>
+            <CardHeader compact>
+              <CardTitle>Configuration du mode</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "flex-end",
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {(["TRAINING", "SUGGESTION", "AUTO"] as ModeName[]).map((value) => {
+                    const active = newMode === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setNewMode(value)}
                         style={{
-                          fontSize: 9,
-                          padding: "2px 7px",
-                          borderRadius: 999,
-                          background: statusStyle.bg,
-                          color: statusStyle.color,
-                          border: `1px solid ${statusStyle.border}`,
+                          border: active ? "1px solid rgba(125,211,252,0.35)" : "1px solid rgba(51,65,85,0.92)",
+                          background: active ? "rgba(30,41,59,0.92)" : "rgba(15,23,42,0.62)",
+                          color: active ? "#e2e8f0" : "#cbd5e1",
+                          borderRadius: 12,
+                          padding: "10px 12px",
+                          fontSize: 12,
                           fontWeight: 700,
+                          cursor: "pointer",
                         }}
                       >
-                        {statusLabel(suggestion.status)}
-                      </span>
-                      <span style={{ fontSize: 10, color: "#64748b" }}>{suggestion.ip}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{suggestion.description}</div>
-                    {suggestion.command && (
-                      <div style={{ fontSize: 10, color: "#60a5fa", fontFamily: "monospace" }}>$ {suggestion.command}</div>
+                        <span style={{ color: modeMeta[value].tint, marginRight: 8 }}>{modeMeta[value].glyph}</span>
+                        {modeMeta[value].label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{ flex: "1 1 180px", minWidth: 180 }}>
+                  <label style={{ display: "block", fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>Seuil (0 - 1)</label>
+                  <input
+                    value={newThreshold}
+                    onChange={(event) => setNewThreshold(event.target.value)}
+                    placeholder="0.85"
+                    style={{
+                      width: "100%",
+                      height: 40,
+                      borderRadius: 12,
+                      border: "1px solid rgba(51,65,85,0.92)",
+                      background: "rgba(2,6,23,0.55)",
+                      color: "#e2e8f0",
+                      padding: "0 12px",
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void applyMode()}
+                  disabled={savingMode}
+                  style={{
+                    border: "none",
+                    borderRadius: 12,
+                    padding: "10px 16px",
+                    background: "#f8fafc",
+                    color: "#0f172a",
+                    fontWeight: 700,
+                    cursor: savingMode ? "wait" : "pointer",
+                    opacity: savingMode ? 0.7 : 1,
+                  }}
+                >
+                  {savingMode ? "Application..." : "Appliquer"}
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <ResponsiveGrid columns="3fr 2fr">
+            <Card>
+              <CardHeader row>
+                <div>
+                  <CardTitle>
+                    <span style={{ color: "#fcd34d", marginRight: 8 }}>!</span>
+                    Suggestions en attente
+                    <InlineCount>{pending.length}</InlineCount>
+                  </CardTitle>
+                </div>
+                <span style={mutedText}>Cliquez pour decider</span>
+              </CardHeader>
+              <div style={{ padding: "0 0 16px" }}>
+                <ScrollArea height={420}>
+                  <div style={{ display: "grid", gap: 8, padding: "0 16px 0" }}>
+                    {pending.length === 0 ? (
+                      <EmptyState title="Aucune suggestion en attente" hint="Les nouvelles propositions de l'agent apparaitront ici en temps reel." />
+                    ) : (
+                      pending.map((suggestion) => (
+                        <SuggestionRow
+                          key={suggestion.suggestion_id}
+                          suggestion={suggestion}
+                          active={selectedId === suggestion.suggestion_id}
+                          onClick={() => {
+                            setSelectedId(suggestion.suggestion_id);
+                            setModifiedCmd(suggestion.command ?? "");
+                            setAdminNote("");
+                          }}
+                        />
+                      ))
                     )}
                   </div>
+                </ScrollArea>
+              </div>
+            </Card>
 
-                  <div style={{ fontSize: 9, color: "#64748b", whiteSpace: "nowrap" }}>{formatDateTime(suggestion.timestamp)}</div>
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  <span style={{ color: "#a5b4fc", marginRight: 8 }}>~</span>
+                  Validation administrateur
+                </CardTitle>
+                <CardDescription>
+                  {selectedPending
+                    ? `Decision pour ${selectedPending.suggestion_id}`
+                    : selected
+                      ? `Suggestion ${selected.suggestion_id} deja traitee`
+                      : "Selectionnez une suggestion pour ouvrir le panneau."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {selected ? (
+                  <div style={{ display: "grid", gap: 16 }}>
+                    <div>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>
+                        <span style={{ color: "#86efac" }}>{">_"}</span> Commande (modifiable)
+                      </label>
+                      <textarea
+                        value={modifiedCmd}
+                        onChange={(event) => setModifiedCmd(event.target.value)}
+                        rows={2}
+                        disabled={!selectedPending}
+                        style={{
+                          width: "100%",
+                          borderRadius: 12,
+                          border: "1px solid rgba(6,95,70,0.55)",
+                          background: "rgba(6,78,59,0.22)",
+                          color: "#a7f3d0",
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 12,
+                          lineHeight: 1.6,
+                          padding: 12,
+                          opacity: selectedPending ? 1 : 0.7,
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>
+                        Note admin (optionnel)
+                      </label>
+                      <input
+                        value={adminNote}
+                        onChange={(event) => setAdminNote(event.target.value)}
+                        placeholder="Raison de la decision..."
+                        disabled={!selectedPending}
+                        style={{
+                          width: "100%",
+                          height: 40,
+                          borderRadius: 12,
+                          border: "1px solid rgba(51,65,85,0.92)",
+                          background: "rgba(2,6,23,0.55)",
+                          color: "#e2e8f0",
+                          padding: "0 12px",
+                          opacity: selectedPending ? 1 : 0.7,
+                        }}
+                      />
+                    </div>
+
+                    {selectedPending ? (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                        <ActionButton
+                          label={savingDecision ? "En cours..." : "Approuver"}
+                          background="rgba(16,185,129,0.9)"
+                          color="#ecfdf5"
+                          disabled={savingDecision}
+                          onClick={() => void decide("APPROVE")}
+                        />
+                        <ActionButton
+                          label="Modifier"
+                          background="rgba(14,165,233,0.9)"
+                          color="#eff6ff"
+                          disabled={savingDecision || !modifiedCmd.trim()}
+                          onClick={() => void decide("MODIFY")}
+                        />
+                        <ActionButton
+                          label="Rejeter"
+                          background="rgba(239,68,68,0.92)"
+                          color="#fff1f2"
+                          disabled={savingDecision}
+                          onClick={() => void decide("REJECT")}
+                        />
+                      </div>
+                    ) : (
+                      <EmptyState title="Aucune decision en cours" hint="Choisissez une suggestion a gauche pour approuver, modifier ou rejeter." />
+                    )}
+
+                    {selected && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedId(null)}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          padding: 0,
+                          color: "#94a3b8",
+                          fontSize: 12,
+                          textAlign: "left",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Annuler la selection
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <EmptyState title="Aucune decision en cours" hint="Choisissez une suggestion a gauche pour approuver, modifier ou rejeter." />
+                )}
+              </CardContent>
+            </Card>
+          </ResponsiveGrid>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <span style={{ color: "#a5b4fc", marginRight: 8 }}>#</span>
+                Cycle correctif
+                {lifecycleSource && <InlineCount>{lifecycleSource.suggestion_id}</InlineCount>}
+              </CardTitle>
+              <CardDescription>Suivi des etapes de detection, decision et apprentissage.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {lifecycleSource ? (
+                <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+                  {lifecycleSteps.map((step, index) => (
+                    <LifecycleStep key={step.key} step={step} index={index} total={lifecycleSteps.length} />
+                  ))}
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+              ) : (
+                <div style={{ color: "#94a3b8", fontSize: 14 }}>Aucun cycle a afficher.</div>
+              )}
+            </CardContent>
+          </Card>
 
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.35; }
-        }
-        @keyframes ws-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.35; }
-        }
-      `}</style>
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <span style={{ color: "#94a3b8", marginRight: 8 }}>H</span>
+                Historique recent
+                <InlineCount>{completed.length}</InlineCount>
+              </CardTitle>
+            </CardHeader>
+            <div style={{ padding: 0 }}>
+              {completed.length === 0 ? (
+                <div style={{ padding: 24 }}>
+                  <EmptyState title="Pas encore d'historique" hint="Les decisions traitees resteront visibles ici." />
+                </div>
+              ) : (
+                completed.slice(0, 12).map((suggestion) => (
+                  <HistoryRow key={suggestion.suggestion_id} suggestion={suggestion} />
+                ))
+              )}
+            </div>
+          </Card>
+
+          <div style={{ ...mutedText, display: "flex", gap: 18, flexWrap: "wrap" }}>
+            <span>Sources live: {alarms[0]?.source_ip ?? "--"}</span>
+            <span>Traces correctives: {correctiveActivities.length}</span>
+            <span>Dataset: {selectedDataset || "local default"}</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
+
+const ResponsiveGrid: FC<{ columns: string; children: ReactNode }> = ({ columns, children }) => (
+  <div
+    style={{
+      display: "grid",
+      gap: 16,
+      gridTemplateColumns: columns,
+    }}
+  >
+    {children}
+  </div>
+);
+
+const Card: FC<{ children: ReactNode }> = ({ children }) => <section style={cardStyle}>{children}</section>;
+
+const CardHeader: FC<{ children: ReactNode; compact?: boolean; row?: boolean }> = ({ children, compact, row }) => (
+  <div
+    style={{
+      padding: compact ? "16px 20px 12px" : "20px 20px 12px",
+      display: "flex",
+      flexDirection: row ? "row" : "column",
+      alignItems: row ? "center" : "stretch",
+      justifyContent: row ? "space-between" : "flex-start",
+      gap: 8,
+    }}
+  >
+    {children}
+  </div>
+);
+
+const CardTitle: FC<{ children: ReactNode }> = ({ children }) => (
+  <div style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 600 }}>{children}</div>
+);
+
+const CardDescription: FC<{ children: ReactNode }> = ({ children }) => (
+  <div style={{ color: "#94a3b8", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>{children}</div>
+);
+
+const CardContent: FC<{ children: ReactNode }> = ({ children }) => <div style={{ padding: "0 20px 20px" }}>{children}</div>;
+
+const InlineCount: FC<{ children: ReactNode }> = ({ children }) => (
+  <span
+    style={{
+      marginLeft: 8,
+      display: "inline-flex",
+      alignItems: "center",
+      padding: "2px 8px",
+      borderRadius: 999,
+      border: "1px solid rgba(51,65,85,0.92)",
+      background: "rgba(15,23,42,0.62)",
+      color: "#cbd5e1",
+      fontSize: 11,
+      fontWeight: 600,
+    }}
+  >
+    {children}
+  </span>
+);
+
+const Badge: FC<{ label: string; prefix?: ReactNode; tone: "ok" | "warn" | "neutral" }> = ({ label, prefix, tone }) => {
+  const color = tone === "ok" ? "#86efac" : tone === "warn" ? "#fcd34d" : "#cbd5e1";
+  const border = tone === "ok" ? "rgba(16,185,129,0.28)" : tone === "warn" ? "rgba(245,158,11,0.28)" : "rgba(51,65,85,0.92)";
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "7px 10px",
+        borderRadius: 999,
+        border: `1px solid ${border}`,
+        background: "rgba(15,23,42,0.62)",
+        color,
+        fontSize: 12,
+        fontWeight: 600,
+      }}
+    >
+      {prefix}
+      {label}
+    </span>
+  );
+};
+
+const LiveDot: FC<{ active: boolean }> = ({ active }) => (
+  <span
+    style={{
+      width: 8,
+      height: 8,
+      borderRadius: "50%",
+      background: active ? "#10b981" : "#f59e0b",
+      boxShadow: active ? "0 0 0 5px rgba(16,185,129,0.08)" : "0 0 0 5px rgba(245,158,11,0.08)",
+      display: "inline-block",
+    }}
+  />
+);
+
+const GlyphPill: FC<{ glyph: string; color: string }> = ({ glyph, color }) => (
+  <span
+    style={{
+      width: 18,
+      height: 18,
+      borderRadius: "50%",
+      display: "inline-grid",
+      placeItems: "center",
+      fontSize: 10,
+      fontWeight: 700,
+      background: "rgba(15,23,42,0.72)",
+      border: "1px solid rgba(51,65,85,0.92)",
+      color,
+      flexShrink: 0,
+    }}
+  >
+    {glyph}
+  </span>
+);
+
+const KpiCard: FC<{
+  label: string;
+  value: string | number;
+  glyph: string;
+  tint: string;
+  pulse?: boolean;
+}> = ({ label, value, glyph, tint, pulse }) => (
+  <Card>
+    <div style={{ padding: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.12em", color: "#64748b" }}>
+          {label}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", color: tint }}>{value}</div>
+      </div>
+      <div
+        style={{
+          width: 38,
+          height: 38,
+          borderRadius: 12,
+          display: "grid",
+          placeItems: "center",
+          background: "rgba(30,41,59,0.75)",
+          color: tint,
+          fontWeight: 700,
+          boxShadow: pulse ? `0 0 0 6px ${tint}15` : "none",
+        }}
+      >
+        {glyph}
+      </div>
+    </div>
+  </Card>
+);
+
+const ScrollArea: FC<{ children: ReactNode; height: number }> = ({ children, height }) => (
+  <div style={{ maxHeight: height, overflowY: "auto" }}>{children}</div>
+);
+
+const ActionButton: FC<{
+  label: string;
+  background: string;
+  color: string;
+  disabled?: boolean;
+  onClick: () => void;
+}> = ({ label, background, color, disabled, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    style={{
+      border: "none",
+      borderRadius: 12,
+      height: 42,
+      background,
+      color,
+      fontWeight: 700,
+      cursor: disabled ? "not-allowed" : "pointer",
+      opacity: disabled ? 0.55 : 1,
+    }}
+  >
+    {label}
+  </button>
+);
+
+const SuggestionRow: FC<{
+  suggestion: CorrectiveSuggestion;
+  active: boolean;
+  onClick: () => void;
+}> = ({ suggestion, active, onClick }) => {
+  const sev = severityTone(suggestion.severity);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "stretch",
+        gap: 16,
+        width: "100%",
+        textAlign: "left",
+        borderRadius: 16,
+        border: active ? "1px solid rgba(99,102,241,0.58)" : "1px solid rgba(51,65,85,0.92)",
+        background: active ? "rgba(15,23,42,0.82)" : "rgba(2,6,23,0.42)",
+        padding: 16,
+        cursor: "pointer",
+        boxShadow: active ? "0 0 0 1px rgba(99,102,241,0.22) inset" : "none",
+      }}
+    >
+      <div
+        style={{
+          minWidth: 76,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 12,
+          background: "rgba(15,23,42,0.82)",
+          border: "1px solid rgba(51,65,85,0.92)",
+          padding: "10px 8px",
+        }}
+      >
+        <span style={{ fontSize: 22, fontWeight: 600, color: confidenceColor(suggestion.confidence) }}>
+          {formatPercent(suggestion.confidence)}
+        </span>
+        <span style={{ fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "#64748b" }}>Conf.</span>
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 8px",
+              borderRadius: 999,
+              border: `1px solid ${sev.border}`,
+              background: sev.background,
+              color: sev.color,
+              fontSize: 10,
+              fontWeight: 700,
+            }}
+          >
+            !
+            {normalizeSeverity(suggestion.severity)}
+          </span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "#f8fafc" }}>{suggestion.action_type}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#64748b" }}>{suggestion.ip}</span>
+        </div>
+        <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: "#94a3b8" }}>{suggestion.description}</div>
+        {suggestion.command && (
+          <div
+            title={suggestion.command}
+            style={{
+              marginTop: 10,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              overflow: "hidden",
+              borderRadius: 10,
+              border: "1px solid rgba(6,95,70,0.42)",
+              background: "rgba(6,78,59,0.22)",
+              padding: "7px 10px",
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "#6ee7b7",
+            }}
+          >
+            <span>{">_"}</span>
+            <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{suggestion.command}</span>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "space-between", fontSize: 11, color: "#64748b" }}>
+        <span>{formatClock(suggestion.timestamp)}</span>
+        <span style={{ color: active ? "#a5b4fc" : "#475569" }}>{">"}</span>
+      </div>
+    </button>
+  );
+};
+
+const LifecycleStep: FC<{ step: TraceStep; index: number; total: number }> = ({ step, index, total }) => {
+  const tone =
+    step.state === "done"
+      ? { border: "rgba(16,185,129,0.4)", background: "rgba(16,185,129,0.1)", color: "#86efac", glyph: "V" }
+      : step.state === "active"
+        ? { border: "rgba(245,158,11,0.4)", background: "rgba(245,158,11,0.1)", color: "#fcd34d", glyph: "O" }
+        : step.state === "skipped"
+          ? { border: "rgba(51,65,85,0.92)", background: "rgba(30,41,59,0.62)", color: "#64748b", glyph: "X" }
+          : { border: "rgba(51,65,85,0.92)", background: "rgba(30,41,59,0.42)", color: "#94a3b8", glyph: "C" };
+
+  return (
+    <div style={{ position: "relative" }}>
+      {index < total - 1 && (
+        <div
+          style={{
+            position: "absolute",
+            left: 36,
+            top: 16,
+            width: "calc(100% - 32px)",
+            height: 1,
+            background: tone.background,
+          }}
+        />
+      )}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+        <div
+          style={{
+            position: "relative",
+            zIndex: 1,
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            display: "grid",
+            placeItems: "center",
+            border: `1px solid ${tone.border}`,
+            background: tone.background,
+            color: tone.color,
+            fontWeight: 700,
+            flexShrink: 0,
+          }}
+        >
+          {tone.glyph}
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: "#64748b" }}>
+            Etape {index + 1}
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#f8fafc" }}>{step.label}</div>
+          <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.6, color: "#94a3b8" }}>{step.detail}</div>
+          <div style={{ marginTop: 4, fontSize: 10, color: "#64748b", fontFamily: "var(--font-mono)" }}>{formatClock(step.timestamp)}</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const HistoryRow: FC<{ suggestion: CorrectiveSuggestion }> = ({ suggestion }) => {
+  const tone = statusTone(suggestion.status);
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 16,
+        padding: "14px 20px",
+        borderTop: "1px solid rgba(51,65,85,0.92)",
+      }}
+    >
+      <div
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 10,
+          display: "grid",
+          placeItems: "center",
+          border: `1px solid ${tone.border}`,
+          background: tone.background,
+          color: tone.color,
+          fontWeight: 700,
+        }}
+      >
+        {suggestion.status === "APPROVED" ? "V" : suggestion.status === "REJECTED" ? "X" : suggestion.status === "MODIFIED" ? "~" : "C"}
+      </div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, fontSize: 14 }}>
+          <span style={{ fontWeight: 600, color: "#f8fafc" }}>{suggestion.action_type}</span>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "3px 8px",
+              borderRadius: 999,
+              border: `1px solid ${tone.border}`,
+              background: tone.background,
+              color: tone.color,
+              fontSize: 10,
+              fontWeight: 700,
+            }}
+          >
+            {statusLabel(suggestion.status)}
+          </span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#64748b" }}>{suggestion.ip}</span>
+        </div>
+        <div style={{ marginTop: 4, fontSize: 12, color: "#94a3b8", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {suggestion.description}
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", fontSize: 12 }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, color: confidenceColor(suggestion.confidence) }}>
+          {formatPercent(suggestion.confidence)}
+        </span>
+        <span style={{ color: "#64748b" }}>{formatRelative(suggestion.timestamp)}</span>
+      </div>
+    </div>
+  );
+};
+
+const EmptyState: FC<{ title: string; hint: string }> = ({ title, hint }) => (
+  <div
+    style={{
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      borderRadius: 16,
+      border: "1px dashed rgba(51,65,85,0.92)",
+      background: "rgba(2,6,23,0.42)",
+      padding: 32,
+      textAlign: "center",
+    }}
+  >
+    <div
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: "50%",
+        display: "grid",
+        placeItems: "center",
+        background: "rgba(30,41,59,0.65)",
+        color: "#94a3b8",
+        fontWeight: 700,
+      }}
+    >
+      O
+    </div>
+    <div style={{ fontSize: 14, fontWeight: 600, color: "#e2e8f0" }}>{title}</div>
+    <div style={{ maxWidth: 320, fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>{hint}</div>
+  </div>
+);
 
 export default CorrectiveAgentPanel;

@@ -31,7 +31,7 @@ export const ServerSelector = ({ selected, onChange }: Props) => {
         letterSpacing: 1,
       }}
     >
-      DATASET
+      SOURCE
       <select
         value={selected}
         onChange={(event) => onChange(event.target.value)}
@@ -46,7 +46,7 @@ export const ServerSelector = ({ selected, onChange }: Props) => {
           fontWeight: 600,
         }}
       >
-        {servers.length === 0 && <option value="">No dataset</option>}
+        {servers.length === 0 && <option value="">Aucune source</option>}
         {servers.map((dataset) => (
           <option key={dataset.id} value={dataset.id}>
             {dataset.display}

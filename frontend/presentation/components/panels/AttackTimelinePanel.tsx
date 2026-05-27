@@ -37,7 +37,7 @@ export function AttackTimelinePanel({ alarms, sessions }: AttackTimelinePanelPro
   return (
     <div className="chart-card timeline-card">
       <div className="chart-header">
-        <span className="chart-title">Attack Reconstruction Timeline</span>
+        <span className="chart-title">Recent Alarm Sequence</span>
         <span className={
           sorted.some(a => a.severity === "CRITICAL") ? "badge-crit" : "badge-warn"
         }>

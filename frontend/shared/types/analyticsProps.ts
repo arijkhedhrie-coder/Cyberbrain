@@ -10,11 +10,10 @@ import type {
   EngineScore,
   AgentDecision,
   SessionSummary,
-  TrustData,
-  KpiData,
+  ThresholdHistoryEntry,
+  ExplainabilityData,
 } from "./idps";
 
-import type { CorrectiveSuggestion } from "./idps";
 import type { EntropyPoint }         from "./analytics";
 
 // ─────────────────────────────────────────────────────────────────
@@ -33,6 +32,8 @@ export interface EntropyChartProps {
 // ─────────────────────────────────────────────────────────────────
 export interface AttackHeatmapProps {
   alarms: AlarmItem[];
+  embedded?: boolean;
+  days?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -42,6 +43,7 @@ export interface AttackHeatmapProps {
 // ─────────────────────────────────────────────────────────────────
 export interface RadarEngineChartProps {
   engines: EngineScore[];
+  compact?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -60,8 +62,8 @@ export interface StreamingPipelineProps {
 // Affiche: seuil fixe vs adaptatif vs activité réelle
 // ─────────────────────────────────────────────────────────────────
 export interface AdaptiveThresholdPanelProps {
-  sessions: SessionSummary[];
-  engines:  EngineScore[];
+  thresholdHistory: ThresholdHistoryEntry[];
+  engines: EngineScore[];
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -70,12 +72,7 @@ export interface AdaptiveThresholdPanelProps {
 // Affiche: "Pourquoi cette alarme ?" avec features réelles
 // ─────────────────────────────────────────────────────────────────
 export interface ExplainabilityPanelProps {
-  decisions:   AgentDecision[];
-  suggestions: CorrectiveSuggestion[];
-  trust:       TrustData;
-  topAlarm:    AlarmItem | null;
-  kpis:        KpiData | null;
-  engines:     EngineScore[];
+  data: ExplainabilityData | null;
 }
 
 // ─────────────────────────────────────────────────────────────────

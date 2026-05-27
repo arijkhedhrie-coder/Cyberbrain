@@ -1,102 +1,46 @@
-// src/components/MinimizationChart.tsx
-// ─────────────────────────────────────────────────────────────────────────────
-// Courbe de minimisation du risque
-// Endpoint : GET http://localhost:5000/api/minimization
-// Données  : { series: [{ timestamp, alarmes, risque }], source, count }
-//
-// Si le backend est absent → fallback sur une série simulée avec variation réelle.
-// ─────────────────────────────────────────────────────────────────────────────
-
-import { useEffect, useState, useRef } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
+import axios from "axios";
 import {
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  ReferenceLine,
   Area,
   AreaChart,
+  CartesianGrid,
+  Legend,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
-import axios from "axios";
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-interface MinPoint {
+export interface MinimizationPoint {
   timestamp: string;
   alarmes: number;
   risque: number;
 }
 
 interface MinimizationEnvelope {
-  series?: MinPoint[];
+  series?: MinimizationPoint[];
   source?: "realtime" | "memory";
-  count?: number;
 }
 
-type MinimizationResponse = MinimizationEnvelope | MinPoint[];
+type MinimizationResponse = MinimizationEnvelope | MinimizationPoint[];
 
-// ── Mock : variation réelle simulée ─────────────────────────────────────────
-// Simule l'effet de notre solution : pic d'alarmes au début → tendance ↓
-
-const getMockMinimizationSeries = (): MinPoint[] => {
-  const base = [12, 18, 24, 31, 27, 22, 19, 14, 11, 9, 7, 8, 6, 4, 5, 3, 4, 2, 2, 1];
-  const now = new Date();
-
-  return base.map((val, i) => {
-    const t = new Date(now.getTime() - (19 - i) * 5 * 60 * 1000);
-    const noise = Math.floor(Math.random() * 3) - 1; // ±1
-    const alarmes = Math.max(0, val + noise);
-    return {
-      timestamp: t.toTimeString().slice(0, 5),
-      alarmes,
-      risque: Math.max(0, Math.round(alarmes * 3.8 + Math.random() * 4)), // % risque corrélé
-    };
-  });
-};
-
-// ── Tooltip personnalisé ─────────────────────────────────────────────────────
-
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
-  const alarmes = payload.find((p: any) => p.dataKey === "alarmes")?.value;
-  const risque  = payload.find((p: any) => p.dataKey === "risque")?.value;
-
-  return (
-    <div style={{
-      background: "#0f1117",
-      border: "1px solid #22c55e44",
-      borderRadius: 8,
-      padding: "10px 14px",
-      fontSize: 13,
-      color: "#e2e8f0",
-      boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
-    }}>
-      <div style={{ color: "#94a3b8", marginBottom: 4, fontFamily: "monospace" }}>
-        ⏱ {label}
-      </div>
-      {alarmes !== undefined && (
-        <div style={{ color: "#f87171" }}>
-          🔔 Alarmes : <strong>{alarmes}</strong>
-        </div>
-      )}
-      {risque !== undefined && (
-        <div style={{ color: "#22c55e" }}>
-          🛡 Risque résiduel : <strong>{risque}%</strong>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ── Composant principal ──────────────────────────────────────────────────────
+interface Props {
+  dataset?: string;
+  embedded?: boolean;
+  showMetricTiles?: boolean;
+  showFooterNotes?: boolean;
+  chartHeight?: number;
+  onSeriesChange?: (series: MinimizationPoint[], source: "realtime" | "memory" | null) => void;
+}
 
 const FLASK_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-const isMinPoint = (value: unknown): value is MinPoint => {
+const isMinPoint = (value: unknown): value is MinimizationPoint => {
   if (!value || typeof value !== "object") return false;
   const point = value as Record<string, unknown>;
+
   return (
     typeof point.timestamp === "string" &&
     typeof point.alarmes === "number" &&
@@ -106,16 +50,14 @@ const isMinPoint = (value: unknown): value is MinPoint => {
 
 const normalizeMinimizationResponse = (
   data: MinimizationResponse,
-): { series: MinPoint[]; source: "realtime" | "memory" } | null => {
+): { series: MinimizationPoint[]; source: "realtime" | "memory" } | null => {
   if (Array.isArray(data)) {
     const series = data.filter(isMinPoint);
     return series.length > 0 ? { series, source: "memory" } : null;
   }
 
   const series = Array.isArray(data.series) ? data.series.filter(isMinPoint) : [];
-  if (series.length === 0) {
-    return null;
-  }
+  if (series.length === 0) return null;
 
   return {
     series,
@@ -123,264 +65,333 @@ const normalizeMinimizationResponse = (
   };
 };
 
-interface Props {
-  dataset?: string;
-}
+const formatSourceLabel = (source: "realtime" | "memory") => {
+  if (source === "realtime") {
+    return { label: "TEMPS REEL", color: "#34d399", bg: "rgba(52,211,153,0.12)" };
+  }
+  return { label: "HISTORIQUE", color: "#7dd3fc", bg: "rgba(125,211,252,0.12)" };
+};
 
-const MinimizationChart = ({ dataset = "" }: Props) => {
-  const [series, setSeries]     = useState<MinPoint[]>([]);
-  const [source, setSource]     = useState<"realtime" | "memory" | "mock">("mock");
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState<string | null>(null);
-  const intervalRef             = useRef<ReturnType<typeof setInterval> | null>(null);
+const getTrend = (series: MinimizationPoint[]) => {
+  if (series.length < 2) return null;
 
-  const fetchData = async () => {
-    try {
-      const query = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
-      const res = await axios.get<MinimizationResponse>(
-        `${FLASK_BASE}/api/minimization${query}`,
-        { timeout: 3000 }
-      );
-      const normalized = normalizeMinimizationResponse(res.data);
+  const delta = series[series.length - 1].alarmes - series[0].alarmes;
+  if (delta < -2) return { label: "Pression en baisse", color: "#34d399" };
+  if (delta > 2) return { label: "Pression en hausse", color: "#fb7185" };
+  return { label: "Situation stable", color: "#fbbf24" };
+};
 
-      if (normalized) {
-        setSeries(normalized.series);
-        setSource(normalized.source);
-        setError(null);
-      } else {
-        // Endpoint OK mais aucune session encore
-        setSeries(getMockMinimizationSeries());
-        setSource("mock");
-      }
-    } catch {
-      // Backend absent → mock
-      setSeries(getMockMinimizationSeries());
-      setSource("mock");
-      setError("Backend indisponible — données simulées");
-    } finally {
-      setLoading(false);
-    }
-  };
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+
+  const alarms = payload.find((item: any) => item.dataKey === "alarmes")?.value;
+  const risk = payload.find((item: any) => item.dataKey === "risque")?.value;
+
+  return (
+    <div
+      style={{
+        background: "#101826",
+        border: "1px solid rgba(148,163,184,0.18)",
+        borderRadius: 12,
+        padding: "10px 12px",
+        boxShadow: "0 18px 40px rgba(2,6,23,0.34)",
+      }}
+    >
+      <div style={{ color: "#cbd5e1", fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{label}</div>
+      <div style={{ color: "#fda4af", fontSize: 12, marginBottom: 4 }}>Alertes finales : {alarms ?? 0}</div>
+      <div style={{ color: "#6ee7b7", fontSize: 12 }}>Risque restant : {risk ?? 0}%</div>
+    </div>
+  );
+};
+
+const metricTileStyle: CSSProperties = {
+  padding: "12px 14px",
+  borderRadius: 14,
+  border: "1px solid rgba(148,163,184,0.12)",
+  background: "linear-gradient(180deg, rgba(15,23,42,0.74), rgba(15,23,42,0.4))",
+};
+
+export default function MinimizationChart({
+  dataset = "",
+  embedded = false,
+  showMetricTiles = true,
+  showFooterNotes = true,
+  chartHeight = 250,
+  onSeriesChange,
+}: Props) {
+  const [series, setSeries] = useState<MinimizationPoint[]>([]);
+  const [source, setSource] = useState<"realtime" | "memory" | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    fetchData();
-    // Rafraîchissement toutes les 30s
-    intervalRef.current = setInterval(fetchData, 30_000);
+    setLoading(true);
+
+    const fetchData = async () => {
+      try {
+        const query = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
+        const response = await axios.get<MinimizationResponse>(`${FLASK_BASE}/api/minimization${query}`, {
+          timeout: 3000,
+        });
+        const normalized = normalizeMinimizationResponse(response.data);
+
+        if (normalized) {
+          setSeries(normalized.series);
+          setSource(normalized.source);
+          setError(null);
+          return;
+        }
+
+        setSeries([]);
+        setSource(null);
+        setError("Aucune serie de minimisation exploitable n'a ete retournee.");
+      } catch {
+        setSeries([]);
+        setSource(null);
+        setError("Le flux de minimisation est temporairement indisponible.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void fetchData();
+    intervalRef.current = setInterval(() => {
+      void fetchData();
+    }, 30_000);
+
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [dataset]);
 
-  // ── Calcul de la tendance globale ──────────────────────────────────────────
-  const trend = (() => {
-    if (series.length < 2) return null;
-    const first = series[0].alarmes;
-    const last  = series[series.length - 1].alarmes;
-    const delta = last - first;
-    if (delta < -2) return { label: "↓ Risque en baisse", color: "#22c55e" };
-    if (delta > 2)  return { label: "↑ Risque en hausse", color: "#f87171" };
-    return { label: "→ Risque stable", color: "#f59e0b" };
-  })();
+  useEffect(() => {
+    if (onSeriesChange) onSeriesChange(series, source);
+  }, [onSeriesChange, series, source]);
 
-  const maxAlarmes = Math.max(...series.map(s => s.alarmes), 1);
-
-  // ── Render ─────────────────────────────────────────────────────────────────
+  const latest = series[series.length - 1];
+  const peakAlarms = Math.max(...series.map((point) => point.alarmes), 0);
+  const lowestRisk = series.length > 0 ? Math.min(...series.map((point) => point.risque)) : 0;
+  const trend = getTrend(series);
+  const sourceVisual = source ? formatSourceLabel(source) : null;
 
   return (
-    <div style={{
-      background: "linear-gradient(135deg, #0a0d14 0%, #0f1520 100%)",
-      border: "1px solid #1e293b",
-      borderRadius: 16,
-      padding: "24px 28px",
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-    }}>
+    <div
+      className="chart-card"
+      style={{
+        padding: embedded ? 24 : 20,
+        borderRadius: embedded ? 22 : undefined,
+        background:
+          "radial-gradient(circle at top right, rgba(52,211,153,0.08), transparent 32%), linear-gradient(180deg, rgba(15,23,42,0.92), rgba(15,23,42,0.74))",
+      }}
+    >
+      {!embedded && (
+        <div className="chart-header" style={{ alignItems: "flex-start", marginBottom: 18 }}>
+          <div style={{ display: "grid", gap: 6 }}>
+            <span className="chart-title">Evolution de la reduction des alertes</span>
+            <span style={{ fontSize: 12, color: "#8ba5c0", lineHeight: 1.5 }}>
+              Alertes finales et risque restant sur les derniers passages enregistres.
+            </span>
+          </div>
 
-      {/* ── Header ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
-        <div>
-          <h3 style={{
-            margin: 0,
-            fontSize: 16,
-            color: "#e2e8f0",
-            letterSpacing: "0.05em",
-            textTransform: "uppercase",
-          }}>
-            🛡 Courbe de Minimisation du Risque
-          </h3>
-          <p style={{ margin: "6px 0 0", fontSize: 12, color: "#475569" }}>
-            Évolution temporelle des alarmes · Détection → Prévision → Action corrective
-          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {trend && (
+              <span
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 999,
+                  border: `1px solid ${trend.color}33`,
+                  background: `${trend.color}14`,
+                  color: trend.color,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                }}
+              >
+                {trend.label.toUpperCase()}
+              </span>
+            )}
+            {sourceVisual && (
+              <span
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(148,163,184,0.18)",
+                  background: sourceVisual.bg,
+                  color: sourceVisual.color,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                }}
+              >
+                {sourceVisual.label}
+              </span>
+            )}
+          </div>
         </div>
+      )}
 
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+      {embedded && (trend || sourceVisual) && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
           {trend && (
-            <span style={{
-              fontSize: 12,
-              color: trend.color,
-              background: trend.color + "22",
-              border: `1px solid ${trend.color}44`,
-              borderRadius: 6,
-              padding: "3px 10px",
-              fontWeight: 600,
-            }}>
-              {trend.label}
+            <span
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                border: `1px solid ${trend.color}33`,
+                background: `${trend.color}14`,
+                color: trend.color,
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+              }}
+            >
+              {trend.label.toUpperCase()}
             </span>
           )}
-          <span style={{
-            fontSize: 11,
-            color: source === "realtime" ? "#22c55e" : source === "memory" ? "#60a5fa" : "#94a3b8",
-            background: "#1e293b",
-            borderRadius: 4,
-            padding: "2px 8px",
-          }}>
-            {source === "realtime" ? "● LIVE" : source === "memory" ? "◎ HISTORIQUE" : "○ SIMULATION"}
-          </span>
+          {sourceVisual && (
+            <span
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                border: "1px solid rgba(148,163,184,0.18)",
+                background: sourceVisual.bg,
+                color: sourceVisual.color,
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+              }}
+            >
+              {sourceVisual.label}
+            </span>
+          )}
         </div>
-      </div>
+      )}
 
-      {/* ── Métriques résumées ── */}
-      {series.length > 0 && (
-        <div style={{ display: "flex", gap: 16, marginBottom: 20 }}>
+      {showMetricTiles && series.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+            gap: 10,
+            marginBottom: 18,
+          }}
+        >
           {[
-            {
-              label: "Pic d'alarmes",
-              value: maxAlarmes,
-              color: "#f87171",
-              unit: "",
-            },
-            {
-              label: "Niveau actuel",
-              value: series[series.length - 1]?.alarmes ?? 0,
-              color: "#22c55e",
-              unit: " alarmes",
-            },
-            {
-              label: "Risque résiduel",
-              value: series[series.length - 1]?.risque ?? 0,
-              color: "#22c55e",
-              unit: "%",
-            },
-            {
-              label: "Sessions analysées",
-              value: series.length,
-              color: "#60a5fa",
-              unit: "",
-            },
-          ].map(({ label, value, color, unit }) => (
-            <div key={label} style={{
-              flex: 1,
-              background: "#0f1117",
-              border: "1px solid #1e293b",
-              borderRadius: 10,
-              padding: "12px 14px",
-              textAlign: "center",
-            }}>
-              <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}{unit}</div>
-              <div style={{ fontSize: 10, color: "#475569", marginTop: 2, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
+            { label: "Pic d'alertes", value: peakAlarms, tone: "#fda4af" },
+            { label: "Alertes actuelles", value: latest?.alarmes ?? 0, tone: "#e2e8f0" },
+            { label: "Risque restant", value: `${latest?.risque ?? 0}%`, tone: "#6ee7b7" },
+            { label: "Risque le plus bas", value: `${lowestRisk}%`, tone: "#7dd3fc" },
+          ].map((item) => (
+            <div key={item.label} style={metricTileStyle}>
+              <div style={{ fontSize: 11, color: "#7c8fa1", marginBottom: 8 }}>{item.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: item.tone }}>{item.value}</div>
             </div>
           ))}
         </div>
       )}
 
-      {/* ── Graphique principal : alarmes ── */}
       {loading ? (
-        <div style={{ textAlign: "center", color: "#475569", padding: 40 }}>
-          Chargement des données…
+        <div className="chart-empty">Chargement de l'historique...</div>
+      ) : series.length === 0 ? (
+        <div
+          className="chart-empty"
+          style={{
+            minHeight: chartHeight,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            textAlign: "center",
+            padding: 20,
+          }}
+        >
+          {error ?? "Aucune donnee live disponible pour la minimisation du risque."}
         </div>
       ) : (
-        <>
-          <div style={{ marginBottom: 6, fontSize: 11, color: "#475569", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-            Nombre d'alarmes par session
-          </div>
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={series} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
-              <defs>
-                <linearGradient id="alarmGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#f87171" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#f87171" stopOpacity={0.02} />
-                </linearGradient>
-                <linearGradient id="risqueGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.2} />
-                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-              <XAxis
-                dataKey="timestamp"
-                tick={{ fill: "#475569", fontSize: 11 }}
-                axisLine={{ stroke: "#1e293b" }}
-                tickLine={false}
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                tick={{ fill: "#475569", fontSize: 11 }}
-                axisLine={{ stroke: "#1e293b" }}
-                tickLine={false}
-                allowDecimals={false}
-              />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend
-                formatter={(value) => (
-                  <span style={{ color: "#94a3b8", fontSize: 12 }}>
-                    {value === "alarmes" ? "Alarmes déclenchées" : "% Risque résiduel"}
-                  </span>
-                )}
-              />
-              {/* Seuil d'alerte */}
-              <ReferenceLine
-                y={10}
-                stroke="#f59e0b"
-                strokeDasharray="4 4"
-                label={{ value: "Seuil critique", fill: "#f59e0b", fontSize: 11, position: "right" }}
-              />
-              <Area
-                type="monotone"
-                dataKey="alarmes"
-                stroke="#f87171"
-                strokeWidth={2}
-                fill="url(#alarmGrad)"
-                dot={{ fill: "#f87171", r: 3 }}
-                activeDot={{ r: 5, fill: "#fca5a5" }}
-              />
-              <Area
-                type="monotone"
-                dataKey="risque"
-                stroke="#22c55e"
-                strokeWidth={2}
-                fill="url(#risqueGrad)"
-                dot={{ fill: "#22c55e", r: 3 }}
-                activeDot={{ r: 5, fill: "#86efac" }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </>
+        <ResponsiveContainer width="100%" height={chartHeight}>
+          <AreaChart data={series} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+            <defs>
+              <linearGradient id="alarmAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#fb7185" stopOpacity={0.18} />
+                <stop offset="95%" stopColor="#fb7185" stopOpacity={0.02} />
+              </linearGradient>
+              <linearGradient id="riskAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#34d399" stopOpacity={0.18} />
+                <stop offset="95%" stopColor="#34d399" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.08)" />
+            <XAxis
+              dataKey="timestamp"
+              tick={{ fill: "#64748b", fontSize: 11 }}
+              axisLine={{ stroke: "rgba(148,163,184,0.12)" }}
+              tickLine={false}
+              interval="preserveStartEnd"
+            />
+            <YAxis
+              tick={{ fill: "#64748b", fontSize: 11 }}
+              axisLine={{ stroke: "rgba(148,163,184,0.12)" }}
+              tickLine={false}
+              allowDecimals={false}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <Legend
+              verticalAlign="top"
+              align="right"
+              wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
+              formatter={(value) => (
+                <span style={{ color: "#94a3b8" }}>
+                  {value === "alarmes" ? "Alertes finales" : "Risque restant"}
+                </span>
+              )}
+            />
+            <ReferenceLine
+              y={10}
+              stroke="#fbbf24"
+              strokeDasharray="4 4"
+              label={{ value: "Seuil critique", fill: "#fbbf24", fontSize: 10, position: "right" }}
+            />
+            <Area
+              type="monotone"
+              dataKey="alarmes"
+              name="alarmes"
+              stroke="#fb7185"
+              strokeWidth={2}
+              fill="url(#alarmAreaGradient)"
+              dot={{ r: 2.5, fill: "#fb7185" }}
+              activeDot={{ r: 4, fill: "#fecdd3" }}
+            />
+            <Area
+              type="monotone"
+              dataKey="risque"
+              name="risque"
+              stroke="#34d399"
+              strokeWidth={2}
+              fill="url(#riskAreaGradient)"
+              dot={{ r: 2.5, fill: "#34d399" }}
+              activeDot={{ r: 4, fill: "#a7f3d0" }}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
       )}
 
-      {/* ── Message d'erreur discret ── */}
-      {error && (
-        <p style={{ fontSize: 11, color: "#475569", margin: "10px 0 0", textAlign: "right" }}>
-          ⚠ {error}
-        </p>
+      {((showFooterNotes && series.length > 0) || error) && (
+        <div
+          className="chart-footer"
+          style={{
+            marginTop: 14,
+            paddingTop: 12,
+            borderTop: "1px solid rgba(148,163,184,0.08)",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          {showFooterNotes && <span className="stat-mini">Courbe corail = alertes finales par passage</span>}
+          {showFooterNotes && <span className="stat-mini">Courbe verte = risque restant apres traitement</span>}
+          {error && <span className="stat-mini" style={{ color: "#94a3b8" }}>{error}</span>}
+        </div>
       )}
-
-      {/* ── Légende explicative ── */}
-      <div style={{
-        marginTop: 18,
-        padding: "12px 16px",
-        background: "#0a0d14",
-        borderRadius: 8,
-        border: "1px solid #1e293b",
-        fontSize: 11,
-        color: "#475569",
-        lineHeight: 1.7,
-      }}>
-        <strong style={{ color: "#64748b" }}>Comment lire ce graphique :</strong>
-        {" "}La courbe <span style={{ color: "#f87171" }}>rouge</span> montre le nombre d'alarmes déclenchées par session.
-        La courbe <span style={{ color: "#22c55e" }}>verte</span> montre le risque résiduel estimé (%).
-        Une tendance descendante indique que notre pipeline de détection + actions correctives réduit efficacement la surface d'attaque.
-      </div>
     </div>
   );
-};
-
-export default MinimizationChart;
+}

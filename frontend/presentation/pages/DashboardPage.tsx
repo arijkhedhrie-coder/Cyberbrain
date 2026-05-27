@@ -6,7 +6,6 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import type { FC } from "react";
 import { useNavigate } from "react-router-dom";
 
 // ── Infrastructure ────────────────────────────────────────────────
@@ -20,31 +19,20 @@ import { useIdpsDashboard } from "../../application/services/useIdpsDashboard";
 import { useDarkMode } from "../hooks/useDarkMode";
 
 // ── Composants existants (INCHANGÉS) ─────────────────────────────
-import MinimizationChart        from "../components/dashboard/MinimizationChart";
 import { Sidebar }              from "../components/dashboard/Sidebar";
 import { TopBar }               from "../components/dashboard/TopBar";
 import { DashboardPanel }       from "../components/dashboard/DashboardPanel";
 import { CorrectiveAgentPanel } from "../components/dashboard/CorrectiveAgentPanel";
+import { ThreatAnalyticsView } from "../components/dashboard/ThreatAnalyticsView";
 
 import { ServerSelector } from "../components/dashboard/ServerSelector";
 
 // ── Nouveaux composants analytiques ──────────────────────────────
-import { EntropyChart }          from "../components/charts/EntropyChart";
-import { AttackHeatmap }         from "../components/charts/AttackHeatmap";
-import { RadarEngineChart }      from "../components/charts/RadarEngineChart";
-import { StreamingPipeline }     from "../components/charts/StreamingPipeline";
-import { BacktestAccuracyChart } from "../components/charts/BacktestAccuracyChart";
-import { AttackTimelinePanel } from "../components/panels/AttackTimelinePanel";
-import { ExplainabilityPanel } from "../components/panels/ExplainibilityPanel";
-import { AdaptiveThresholdPanel } from "../components/panels/AdaptiveThresholdPanel";
+import { PipelineObservabilityTab } from "../components/dashboard/PipelineObservabilityTab";
 import { FusionPanel } from "../components/fusion/FusionPanel";
 
-// ── Types ─────────────────────────────────────────────────────────
-import type { EntropyPoint } from "../../shared/types/analytics";
-import type { TrustData } from "../../shared/types/idps";
-
 // ── Styles ────────────────────────────────────────────────────────
-import "../../shared/style/global.css";
+import "../../shared/style/Global.css";
 import "../../shared/style/theme.css";
 import "../../shared/style/Sidebar.css";
 import { ChatBot } from "../components/Chat/ChatBot";
@@ -68,19 +56,6 @@ type PredictionSummary = {
   };
   prevention_suggestions: string[];
   risk_level: string;
-};
-
-const FALLBACK_TRUST: TrustData = {
-  available: false,
-  model_agreement: null,
-  false_positive_rate: null,
-  drift_score: null,
-  drift_label: "UNKNOWN",
-  drift_flagged: false,
-  stability: "UNKNOWN",
-  confidence_in_metrics: null,
-  confidence_label: "Unavailable",
-  signals_summary: "",
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -236,6 +211,9 @@ export const DashboardPage = () => {
     engines,
     decisions,
     sessions,
+    thresholdHistory,
+    explainability,
+    pipeline,
     logLines,
     trust,
     activities,
@@ -252,38 +230,20 @@ export const DashboardPage = () => {
   const safeEngines   = useMemo(() => Array.isArray(engines)   ? engines   : [], [engines]);
   const safeSessions  = useMemo(() => Array.isArray(sessions)  ? sessions  : [], [sessions]);
   const safeDecisions = useMemo(() => Array.isArray(decisions) ? decisions : [], [decisions]);
+  const safeThresholdHistory = useMemo(
+    () => Array.isArray(thresholdHistory) ? thresholdHistory : [],
+    [thresholdHistory],
+  );
+  const safePipeline = useMemo(
+    () => (pipeline && typeof pipeline === "object" ? pipeline : null),
+    [pipeline],
+  );
   const safeLogLines  = useMemo(() => Array.isArray(logLines)  ? logLines  : [], [logLines]);
   const safeActivities = useMemo(() => Array.isArray(activities) ? activities : [], [activities]);
-  const explainabilityTrust = useMemo(() => trust ?? FALLBACK_TRUST, [trust]);
 
   // ── Alarme critique la plus récente (pour ExplainabilityPanel) ─
-  const topAlarm = useMemo(
-    () => safeAlarms.find(a => a.severity === "CRITICAL")
-       ?? safeAlarms.find(a => a.severity === "HIGH")
-       ?? safeAlarms[0]
-       ?? null,
-    [safeAlarms],
-  );
 
   // ── Accumulation entropy (série temporelle en mémoire) ───────
-  const entropyRef     = useRef<EntropyPoint[]>([]);
-  const prevEntropyRef = useRef<number | null>(null);
-  const [entropyHistory, setEntropyHistory] = useState<EntropyPoint[]>([]);
-
-  useEffect(() => {
-    const val = kpis?.ip_entropy ?? null;
-    if (val === null || val === prevEntropyRef.current) return;
-    prevEntropyRef.current = val;
-    const point: EntropyPoint = {
-      time:      new Date().toLocaleTimeString("fr-FR"),
-      entropy:   val,
-      threshold: 3.8,
-      ipCount:   kpis?.unique_attacking_ips ?? 0,
-    };
-    entropyRef.current = [...entropyRef.current.slice(-29), point];
-    setEntropyHistory([...entropyRef.current]);
-  }, [kpis?.ip_entropy, kpis?.unique_attacking_ips]);
-
   // ── Handlers ─────────────────────────────────────────────────
   const handleRelancer = useCallback(async () => {
     if (relancerLoading) return;
@@ -462,71 +422,26 @@ export const DashboardPage = () => {
 
                 {/* ── TAB: Threat Analytics ── */}
                 {dashboardTab === "analytics" && (
-                  <>
-                    <MinimizationChart dataset={selectedDataset} />
-                    <div className="analytics-divider" style={{ marginTop: 16, marginBottom: 8 }}>
-                      <span className="analytics-divider__label">◈ Deep Analytics</span>
-                    </div>
-                    <div className="grid-2" style={{ gap: 16 }}>
-                      <RadarEngineChart engines={safeEngines} />
-                      <AttackHeatmap alarms={safeAlarms} />
-                    </div>
-                    {safeAlarms.length > 0 && (
-                      <section className="analytics-section" style={{ marginTop: 16 }}>
-                        <div className="section-title">Attack Reconstruction Timeline</div>
-                        <AttackTimelinePanel alarms={safeAlarms} sessions={safeSessions} />
-                      </section>
-                    )}
-                  </>
+                  <ThreatAnalyticsView
+                    dataset={selectedDataset}
+                    kpis={kpis ?? null}
+                    alarms={safeAlarms}
+                    engines={safeEngines}
+                    sessions={safeSessions}
+                  />
                 )}
 
                 {/* ── TAB: Pipeline & ML Health ── */}
                 {dashboardTab === "pipeline" && (
-                  <>
-                    {/* Feature Analytics */}
-                    <div className="grid-2" style={{ gap: 16, marginBottom: 16 }}>
-                      <EntropyChart data={entropyHistory} />
-                      <AdaptiveThresholdPanel sessions={safeSessions} engines={safeEngines} />
-                    </div>
+                  <PipelineObservabilityTab
+                    alarms={safeAlarms}
+                    explainability={explainability}
+                    kpis={kpis}
+                    pipeline={safePipeline}
+                    thresholdHistory={safeThresholdHistory}
+                    trust={trust}
+                  />
 
-                    {/* Streaming Pipeline */}
-                    <section className="analytics-section" style={{ marginBottom: 16 }}>
-                      <div className="section-title">Live Streaming Pipeline</div>
-                      <StreamingPipeline logs={safeLogLines} sessions={safeSessions} />
-                    </section>
-
-                    {/* Trust & Backtest row */}
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 1fr",
-                        gap: 16,
-                        marginBottom: 16,
-                      }}
-                    >
-                      {trust?.available && (
-                        <div className="chart-card" style={{ padding: 14 }}>
-                          <div className="chart-header">
-                            <span className="chart-title">Trust Gate — Score de confiance</span>
-                          </div>
-                          <TrustPanel trust={trust} />
-                        </div>
-                      )}
-                      <BacktestAccuracyChart dataset={selectedDataset} />
-                    </div>
-
-                    {/* Explainable AI (full width, interactive) */}
-                    <section className="analytics-section">
-                      <ExplainabilityPanel
-                        decisions={safeDecisions}
-                        suggestions={suggestions}
-                        trust={explainabilityTrust}
-                        topAlarm={topAlarm}
-                        kpis={kpis ?? null}
-                        engines={safeEngines}
-                      />
-                    </section>
-                  </>
                 )}
               </>
             )}
@@ -619,45 +534,5 @@ export const DashboardPage = () => {
   );
 };
 
-// ── TrustPanel extracted to be reused ──
-// (You can keep this inside DashboardPanel or move it to a separate file;
-//  for simplicity, I duplicate it here – in production, extract it to its own file.)
-const TrustPanel: FC<{ trust: TrustData | null }> = ({ trust }) => {
-  if (!trust?.available) return <div>No trust data</div>;
-  const score = trust.confidence_in_metrics ?? 0;
-  const scoreColor = score >= 0.8 ? "#0F6E56" : score >= 0.6 ? "#854F0B" : "#A32D2D";
-  const pct = Math.round(score * 100);
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ position: "relative", width: 56, height: 56 }}>
-          <svg viewBox="0 0 56 56" width={56} height={56}>
-            <circle cx={28} cy={28} r={24} fill="none" stroke="var(--color-background-secondary,#f3f4f6)" strokeWidth={5}/>
-            <circle cx={28} cy={28} r={24} fill="none" stroke={scoreColor} strokeWidth={5}
-              strokeDasharray={`${(pct/100)*150.8} 150.8`} strokeLinecap="round" transform="rotate(-90 28 28)"/>
-          </svg>
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: scoreColor }}>{pct}%</span>
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 500 }}>{trust.confidence_label}</div>
-          <div style={{ fontSize: 10, color: "#64748b" }}>Score de confiance</div>
-        </div>
-      </div>
-      {([
-        ["Accord modèles", `${((trust.model_agreement??0)*100).toFixed(0)}%`, (trust.model_agreement??0)>=0.8],
-        ["Taux FP", `${((trust.false_positive_rate??0)*100).toFixed(1)}%`, (trust.false_positive_rate??0)<=0.1],
-        ["Drift", `${trust.drift_score?.toFixed(3)??"—"} (${trust.drift_label})`, !trust.drift_flagged],
-        ["Stabilité", trust.stability, trust.stability==="HIGH"],
-      ] as [string,string,boolean][]).map(([k,v,ok]) => (
-        <div key={k} style={{ display:"flex", justifyContent:"space-between", fontSize:11 }}>
-          <span style={{ color:"var(--muted,#6b7280)" }}>{k}</span>
-          <span style={{ color: ok ? "#0F6E56" : "#A32D2D", fontFamily:"monospace", fontWeight:500 }}>{v}</span>
-        </div>
-      ))}
-    </div>
-  );
-};
-
 export default DashboardPage;
+

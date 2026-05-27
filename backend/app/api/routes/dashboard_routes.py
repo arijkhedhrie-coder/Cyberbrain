@@ -12,6 +12,7 @@ from typing import Any, List
 from fastapi import APIRouter, HTTPException, Query
 
 from app.ai.agents.memory import get_memory_file
+from app.core.event_store import replay_timeline
 from app.core.fusion_view import FUSION_DATASET, FUSION_LABEL, is_fusion_dataset, normalize_dataset_query
 from app.core.pipeline_store import AVAILABLE_DATASETS, LEGACY_MERGED_DATASET, PIPELINE_RESULTS
 
@@ -60,6 +61,17 @@ def _as_float_or_none(v):
         return float(v) if v is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _normalized_alarm_severity(value: str) -> str:
+    sev = str(value or "").upper().strip()
+    if sev == "CRITIQUE":
+        return "CRITICAL"
+    if sev == "AVERTISSEMENT":
+        return "HIGH"
+    if sev == "AVERTISSEMENT_MOYEN":
+        return "MED"
+    return sev
 
 
 def _dataset_key(dataset: str | None) -> str:
@@ -235,6 +247,55 @@ def _build_alarms(memory: dict[str, Any], dataset: str | None = None) -> list[di
     return [a for a in alarmes if isinstance(a, dict)]
 
 
+def _build_alarm_history(
+    dataset: str | None = None,
+    severity: str | None = None,
+    offset: int = 0,
+    limit: int = 20,
+) -> dict[str, Any]:
+    dataset_filter = None if is_fusion_dataset(dataset) else (dataset or None)
+    severity_filter = _normalized_alarm_severity(severity or "")
+    records = replay_timeline(categories=["alerts"], dataset_id=dataset_filter, limit=0)
+
+    items: list[dict[str, Any]] = []
+    for record in reversed(records):
+        event_type = str(record.get("event_type") or "")
+        if event_type not in {"ALERT_PASS1", "ALERT_FINAL"}:
+            continue
+
+        payload = record.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+
+        alarm_type = str(payload.get("type") or "")
+        if not alarm_type or alarm_type.startswith("CORRECTIVE_"):
+            continue
+
+        normalized_severity = _normalized_alarm_severity(
+            str(payload.get("severity") or payload.get("severite") or "")
+        )
+        if severity_filter and severity_filter != "ALL" and normalized_severity != severity_filter:
+            continue
+
+        alarm = dict(payload)
+        alarm.setdefault("id", str(record.get("event_id") or payload.get("id") or ""))
+        alarm.setdefault("event_id", str(record.get("event_id") or ""))
+        alarm.setdefault("dataset_id", str(record.get("dataset_id") or payload.get("dataset_id") or ""))
+        alarm.setdefault("stage", "final" if event_type == "ALERT_FINAL" else "pass1")
+        items.append(alarm)
+
+    safe_offset = max(0, int(offset or 0))
+    safe_limit = max(1, min(int(limit or 20), 100))
+    page = items[safe_offset:safe_offset + safe_limit]
+    return {
+        "items": page,
+        "total": len(items),
+        "offset": safe_offset,
+        "limit": safe_limit,
+        "has_more": safe_offset + safe_limit < len(items),
+    }
+
+
 def _build_engine_scores(events: list[dict[str, Any]], memory: dict[str, Any], dataset: str | None = None) -> list[dict[str, Any]]:
     payload = _get_dataset_payload(dataset)
     if payload and isinstance(payload.get("engine_scores"), list):
@@ -367,6 +428,459 @@ def _build_sessions(memory: dict[str, Any], dataset: str | None = None) -> list[
     return result
 
 
+def _build_threshold_history(memory: dict[str, Any], dataset: str | None = None) -> list[dict[str, Any]]:
+    if is_fusion_dataset(dataset):
+        return []
+
+    sessions = memory.get("sessions", [])
+    session_lookup: dict[str, dict[str, Any]] = {}
+    for session in sessions:
+        data = session.get("donnees", {})
+        session_id = str(data.get("date") or session.get("date") or "")
+        if session_id:
+            session_lookup[session_id] = data
+
+    history = memory.get("threshold_history", [])
+    result: list[dict[str, Any]] = []
+    engine_keys = {
+        "SSH": "ssh_high",
+        "WEB": "web_high",
+        "FTP": "ftp_high",
+        "KERNEL": "kernel_high",
+        "SESSION": "session_high",
+    }
+
+    for entry in history[-20:]:
+        snapshots = entry.get("snapshots", [])
+        if not isinstance(snapshots, list) or not snapshots:
+            continue
+
+        pass1_snap = snapshots[0] if isinstance(snapshots[0], dict) else {}
+        pass2_snap = snapshots[-1] if isinstance(snapshots[-1], dict) else pass1_snap
+        session_id = str(entry.get("session_id") or "")
+        session_data = session_lookup.get(session_id, {})
+
+        engines: dict[str, dict[str, Any]] = {}
+        changed_engines: list[str] = []
+        for engine, key in engine_keys.items():
+            pass1_value = _as_float_or_none(pass1_snap.get(key))
+            pass2_value = _as_float_or_none(pass2_snap.get(key))
+            changed = (
+                pass1_value is not None
+                and pass2_value is not None
+                and abs(pass1_value - pass2_value) > 1e-9
+            )
+            if changed:
+                changed_engines.append(engine)
+            engines[engine] = {
+                "pass1": pass1_value,
+                "pass2": pass2_value if pass2_value is not None else pass1_value,
+                "changed": changed,
+            }
+
+        nb_alarms_pass1 = int(entry.get("nb_alarms_pass1", 0) or 0)
+        nb_alarms_final = int(entry.get("nb_alarms_final", 0) or 0)
+        result.append({
+            "timestamp": entry.get("date", ""),
+            "session_id": session_id,
+            "threat_level": entry.get("threat_level") or session_data.get("agent_threat_level", "NORMAL"),
+            "pass2_ran": bool(entry.get("pass2_ran", False)),
+            "nb_alarms_pass1": nb_alarms_pass1,
+            "nb_alarms_final": nb_alarms_final,
+            "alarm_delta": nb_alarms_final - nb_alarms_pass1,
+            "agent_reasoning": str(session_data.get("agent_reasoning", "")),
+            "agent_config_summary": str(session_data.get("agent_config_summary", "")),
+            "engines": engines,
+            "changed_engines": changed_engines,
+            "gate": {
+                "accepted": bool(pass2_snap.get("gate_accepted", False)) if len(snapshots) > 1 else False,
+                "mode": str(pass2_snap.get("gate_mode") or ("NOT_RERUN" if len(snapshots) == 1 else "UNKNOWN")),
+                "version_id": pass2_snap.get("gate_version_id"),
+                "trust_score": _as_float_or_none(pass2_snap.get("trust_score")),
+                "passed": list(pass2_snap.get("gate_passed", []) or []),
+                "failed": list(pass2_snap.get("gate_failed", []) or []),
+            },
+        })
+
+    return result
+
+
+def _severity_rank(value: str | None) -> int:
+    sev = str(value or "").upper()
+    return {
+        "CRITICAL": 4,
+        "CRITIQUE": 4,
+        "HIGH": 3,
+        "AVERTISSEMENT": 3,
+        "MED": 2,
+        "MEDIUM": 2,
+        "LOW": 1,
+        "INFO": 0,
+    }.get(sev, 0)
+
+
+def _normalize_alarm_for_explainability(raw: dict[str, Any]) -> dict[str, Any]:
+    alarm = dict(raw or {})
+    severity = str(alarm.get("severity") or alarm.get("severite") or "MED").upper()
+    if severity == "CRITIQUE":
+        severity = "CRITICAL"
+    elif severity == "AVERTISSEMENT":
+        severity = "HIGH"
+    elif severity == "AVERTISSEMENT_MOYEN":
+        severity = "MED"
+
+    return {
+        "id": str(alarm.get("id") or f"{alarm.get('timestamp', '')}-{alarm.get('ip', '')}-{alarm.get('type', 'UNKNOWN')}"),
+        "timestamp": str(alarm.get("timestamp") or ""),
+        "type": str(alarm.get("type") or "UNKNOWN"),
+        "source_ip": str(alarm.get("source_ip") or alarm.get("ip") or "unknown"),
+        "severity": severity,
+        "engine": str(alarm.get("engine") or alarm.get("domain") or "UNKNOWN").upper(),
+        "score": _as_float_or_none(alarm.get("score")) or 0.0,
+        "message": str(alarm.get("message") or ""),
+        "human_insight": str(alarm.get("human_insight") or alarm.get("message") or ""),
+        "action": str(alarm.get("action") or "MONITOR"),
+        "country": str(alarm.get("country") or "Unknown"),
+        "failures": int(alarm.get("failures", 0) or 0),
+        "dataset_id": str(alarm.get("dataset_id") or ""),
+        "stage": str(alarm.get("stage") or ""),
+        "models_agreed": int(alarm.get("models_agreed", 0) or 0),
+        "model_agreement": _as_float_or_none(alarm.get("model_agreement")),
+        "agreement_label": str(alarm.get("agreement_label") or ""),
+        "layer0_risk": _as_float_or_none(alarm.get("layer0_risk")),
+        "layer0_flags": list(alarm.get("layer0_flags", []) or []),
+        "threshold_snapshot": alarm.get("threshold_snapshot") if isinstance(alarm.get("threshold_snapshot"), dict) else None,
+    }
+
+
+def _pick_top_alarm(alarms: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not alarms:
+        return None
+    normalized = [_normalize_alarm_for_explainability(alarm) for alarm in alarms if isinstance(alarm, dict)]
+    if not normalized:
+        return None
+    normalized.sort(
+        key=lambda alarm: (
+            _severity_rank(str(alarm.get("severity") or "")),
+            float(alarm.get("score") or 0.0),
+            str(alarm.get("timestamp") or ""),
+        ),
+        reverse=True,
+    )
+    return normalized[0]
+
+
+def _normalize_decision_for_explainability(record: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(record, dict):
+        return None
+
+    event_type = str(record.get("event_type") or "")
+    timestamp = str(record.get("timestamp") or record.get("ts") or "")
+
+    if event_type == "DYNAMIC_CONFIG_ISSUED":
+        return {
+            "agent": "Orchestrateur",
+            "action": "Pass 2 dynamic configuration issued",
+            "reasoning": str(record.get("reasoning_excerpt") or "Dynamic configuration issued after Pass 1."),
+            "confidence": _as_float_or_none(record.get("confidence")),
+            "severity": str(record.get("threat_level") or "INFO"),
+            "timestamp": timestamp,
+            "approved": None,
+        }
+    if event_type == "DYNAMIC_CONFIG_DEFAULT":
+        return {
+            "agent": "Orchestrateur",
+            "action": "Pass 2 skipped",
+            "reasoning": str(record.get("note") or "No threshold override was required."),
+            "confidence": None,
+            "severity": "INFO",
+            "timestamp": timestamp,
+            "approved": None,
+        }
+    if event_type == "AGENTS_COMPLETE":
+        return {
+            "agent": "Rapporteur",
+            "action": "Agent coordination completed",
+            "reasoning": str(record.get("result_excerpt") or record.get("message") or "Session complete."),
+            "confidence": None,
+            "severity": "INFO",
+            "timestamp": timestamp,
+            "approved": None,
+        }
+
+    return None
+
+
+def _build_explainability(events: list[dict[str, Any]], memory: dict[str, Any], dataset: str | None = None) -> dict[str, Any]:
+    payload = _get_dataset_payload(dataset)
+    generated_from = "pipeline_payload" if payload else "jsonl_replay"
+    kpis = _build_kpis(events, memory, dataset)
+    alarms = _build_alarms(memory, dataset)
+    trust = _build_trust(events, dataset)
+    engine_scores = _build_engine_scores(events, memory, dataset)
+    threshold_history = _build_threshold_history(memory, dataset)
+    top_alarm = _pick_top_alarm(alarms)
+
+    decisions_raw = _build_decisions(events, dataset)
+    latest_decision = None
+    for record in decisions_raw:
+        latest_decision = _normalize_decision_for_explainability(record)
+        if latest_decision:
+            break
+
+    prediction_payload = None
+    if payload and isinstance(payload.get("prediction"), dict):
+        prediction_payload = payload.get("prediction")
+    else:
+        prediction_event = _get_event(events, "PREDICTION_COMPUTED")
+        if prediction_event:
+            prediction_payload = {
+                "prediction_score": int(prediction_event.get("prediction_score", 0) or 0),
+                "risk_level": "LOW",
+                "flags": list(prediction_event.get("flags", []) or []),
+                "explanations": list(prediction_event.get("explanations", []) or []),
+                "message": str(prediction_event.get("message") or ""),
+            }
+
+    agreement = _as_float_or_none((top_alarm or {}).get("model_agreement"))
+    if agreement is None:
+        agreement = _as_float_or_none(trust.get("model_agreement"))
+    models_agreed = int((top_alarm or {}).get("models_agreed") or sum(1 for engine in engine_scores if int(engine.get("alarms", 0) or 0) > 0))
+
+    threshold_context = None
+    if top_alarm:
+        engine_name = str(top_alarm.get("engine") or "").upper()
+        threshold_snapshot = top_alarm.get("threshold_snapshot") if isinstance(top_alarm.get("threshold_snapshot"), dict) else None
+        if threshold_snapshot:
+            key = f"{engine_name.lower()}_high"
+            threshold_context = {
+                "engine": engine_name,
+                "pass": threshold_snapshot.get("pass"),
+                "issued_by": threshold_snapshot.get("issued_by"),
+                "threshold": _as_float_or_none(threshold_snapshot.get(key)),
+                "threat_level": threshold_snapshot.get("threat_level"),
+                "confidence": _as_float_or_none(threshold_snapshot.get("confidence")),
+                "corr_window": _as_float_or_none(threshold_snapshot.get("corr_window")),
+            }
+        elif threshold_history:
+            latest = threshold_history[-1]
+            engine_snapshot = latest.get("engines", {}).get(engine_name, {})
+            if isinstance(engine_snapshot, dict):
+                threshold_context = {
+                    "engine": engine_name,
+                    "pass1": engine_snapshot.get("pass1"),
+                    "pass2": engine_snapshot.get("pass2"),
+                    "changed": bool(engine_snapshot.get("changed", False)),
+                    "gate_mode": latest.get("gate", {}).get("mode"),
+                    "gate_accepted": bool(latest.get("gate", {}).get("accepted", False)),
+                    "threat_level": latest.get("threat_level"),
+                    "confidence": latest.get("gate", {}).get("trust_score"),
+                }
+
+    evidence: list[dict[str, Any]] = []
+
+    def add_evidence(label: str, value: str, detail: str, weight: float, tone: str, source: str) -> None:
+        if weight <= 0:
+            return
+        evidence.append({
+            "label": label,
+            "value": value,
+            "detail": detail,
+            "weight": round(max(0.0, min(weight, 100.0)), 1),
+            "tone": tone,
+            "source": source,
+        })
+
+    if top_alarm:
+        score = _as_float_or_none(top_alarm.get("score")) or 0.0
+        add_evidence(
+            "Alarm score",
+            f"{score:.1f}",
+            str(top_alarm.get("human_insight") or top_alarm.get("message") or "Top alarm selected from current session."),
+            score,
+            "risk",
+            "alarm.score",
+        )
+        failures = int(top_alarm.get("failures", 0) or 0)
+        add_evidence(
+            "Observed failures",
+            str(failures),
+            f"{failures} failed attempts or suspicious events were attached to the selected alarm source.",
+            min(failures * 5.0, 100.0),
+            "risk",
+            "alarm.failures",
+        )
+        layer0_risk = _as_float_or_none(top_alarm.get("layer0_risk"))
+        if layer0_risk is not None:
+            flags = ", ".join(top_alarm.get("layer0_flags", []) or []) or "no layer0 flags"
+            add_evidence(
+                "Early flood signal",
+                f"{layer0_risk:.2f}",
+                f"Layer 0 pre-scan raised {flags}.",
+                layer0_risk * 100.0,
+                "risk",
+                "alarm.layer0_risk",
+            )
+
+    attack_velocity = _as_float_or_none(kpis.get("attack_velocity"))
+    if attack_velocity is not None:
+        add_evidence(
+            "Attack velocity",
+            f"{attack_velocity:.1f}/min",
+            "Current backend metrics report this event rate across the selected dataset.",
+            min(attack_velocity, 100.0),
+            "risk",
+            "metrics.attack_velocity",
+        )
+
+    entropy = _as_float_or_none(kpis.get("ip_entropy"))
+    if entropy is not None:
+        add_evidence(
+            "IP entropy",
+            f"{entropy:.2f}",
+            "Higher entropy indicates more distributed attacker behavior.",
+            min((entropy / 4.0) * 100.0, 100.0),
+            "context",
+            "metrics.ip_entropy",
+        )
+
+    unique_ips = int(kpis.get("unique_attacking_ips", 0) or 0)
+    if unique_ips > 0:
+        add_evidence(
+            "Unique attacking IPs",
+            str(unique_ips),
+            "Distinct attacking sources recorded in the current session metrics.",
+            min(unique_ips * 4.0, 100.0),
+            "risk",
+            "metrics.unique_attacking_ips",
+        )
+
+    if agreement is not None:
+        add_evidence(
+            "Model agreement",
+            f"{agreement * 100:.0f}%",
+            str((top_alarm or {}).get("agreement_label") or trust.get("confidence_label") or "Agreement signal from trust engine."),
+            agreement * 100.0,
+            "support",
+            "trust.model_agreement",
+        )
+
+    noise_ratio = _as_float_or_none(kpis.get("noise_ratio"))
+    if noise_ratio is not None:
+        add_evidence(
+            "Noise ratio",
+            f"{noise_ratio * 100:.1f}%",
+            "Noise is recorded during deduplication and quality scoring before anomaly analysis.",
+            noise_ratio * 100.0,
+            "context",
+            "metrics.noise_ratio",
+        )
+
+    if prediction_payload:
+        prediction_score = int(prediction_payload.get("prediction_score", 0) or 0)
+        flags = list(prediction_payload.get("flags", []) or [])
+        add_evidence(
+            "Prediction score",
+            str(prediction_score),
+            ", ".join(flags) if flags else str(prediction_payload.get("message") or "Prediction context available."),
+            prediction_score,
+            "risk",
+            "prediction.prediction_score",
+        )
+
+    if threshold_context and threshold_context.get("threshold") is not None:
+        add_evidence(
+            "Applied threshold",
+            f"{float(threshold_context['threshold']):.1f}",
+            f"{threshold_context.get('engine', 'ENGINE')} threshold used in the alarm snapshot for pass {threshold_context.get('pass')}.",
+            min(float(threshold_context["threshold"]) * 2.0, 100.0),
+            "context",
+            "alarm.threshold_snapshot",
+        )
+    elif threshold_context and threshold_context.get("pass1") is not None and threshold_context.get("pass2") is not None:
+        pass1_value = _as_float_or_none(threshold_context.get("pass1")) or 0.0
+        pass2_value = _as_float_or_none(threshold_context.get("pass2")) or 0.0
+        add_evidence(
+            "Threshold shift",
+            f"{pass1_value:.1f} -> {pass2_value:.1f}",
+            f"Latest persisted threshold context for {threshold_context.get('engine', 'ENGINE')}.",
+            min(abs(pass2_value - pass1_value) * 4.0, 100.0),
+            "context",
+            "threshold_history",
+        )
+
+    evidence.sort(key=lambda item: float(item.get("weight", 0.0)), reverse=True)
+
+    prediction_context = None
+    if prediction_payload:
+        prediction_context = {
+            "score": int(prediction_payload.get("prediction_score", 0) or 0),
+            "risk_level": str(prediction_payload.get("risk_level") or "LOW"),
+            "flags": list(prediction_payload.get("flags", []) or []),
+            "explanations": list(prediction_payload.get("explanations", []) or []),
+            "message": str(prediction_payload.get("message") or ""),
+        }
+
+    engine_contributions = [
+        {
+            "engine": str(engine.get("engine") or ""),
+            "alarms": int(engine.get("alarms", 0) or 0),
+            "status": str(engine.get("status") or "CLEAR"),
+            "pass1": _as_float_or_none(engine.get("pass1")),
+            "pass2": _as_float_or_none(engine.get("pass2")),
+            "rerun_p2": bool(engine.get("rerun_p2", False)),
+        }
+        for engine in engine_scores
+        if int(engine.get("alarms", 0) or 0) > 0
+    ]
+
+    narrative_parts = []
+    if top_alarm:
+        narrative_parts.append(
+            f"{top_alarm['type']} on {top_alarm['source_ip']} was prioritized by the {top_alarm['engine']} engine with score {top_alarm['score']:.1f}."
+        )
+    if trust.get("available"):
+        narrative_parts.append(
+            f"Trust is {trust.get('confidence_label', 'UNKNOWN')} with drift {trust.get('drift_label', 'UNKNOWN')} and stability {trust.get('stability', 'UNKNOWN')}."
+        )
+    if threshold_context and threshold_context.get("gate_mode"):
+        narrative_parts.append(
+            f"Latest gate mode for this path is {threshold_context.get('gate_mode')}."
+        )
+    elif threshold_history:
+        latest_gate = threshold_history[-1].get("gate", {})
+        narrative_parts.append(
+            f"Latest threshold history gate is {latest_gate.get('mode', 'UNKNOWN')}."
+        )
+    if prediction_context and prediction_context.get("flags"):
+        narrative_parts.append(
+            f"Prediction flags: {', '.join(prediction_context['flags'])}."
+        )
+
+    return {
+        "available": top_alarm is not None or bool(evidence),
+        "generated_from": generated_from,
+        "dataset_scope": "fusion" if is_fusion_dataset(dataset) else "local",
+        "summary": " ".join(narrative_parts) if narrative_parts else "No explainability evidence available for the selected dataset.",
+        "top_alarm": top_alarm,
+        "model_context": {
+            "agreement": agreement,
+            "models_agreed": models_agreed,
+            "agreement_label": str((top_alarm or {}).get("agreement_label") or trust.get("confidence_label") or "UNKNOWN"),
+            "trust_score": _as_float_or_none(trust.get("confidence_in_metrics")),
+            "trust_label": str(trust.get("confidence_label") or "UNKNOWN"),
+            "drift_label": str(trust.get("drift_label") or "UNKNOWN"),
+            "stability": str(trust.get("stability") or "UNKNOWN"),
+            "signals_summary": str(trust.get("signals_summary") or ""),
+        },
+        "evidence": evidence[:6],
+        "engine_contributions": engine_contributions,
+        "latest_decision": latest_decision,
+        "prediction_context": prediction_context,
+        "threshold_context": threshold_context,
+    }
+
+
 def _filter_alarms_by_servers(all_alarms: list[dict[str, Any]], servers: list[str]) -> list[dict[str, Any]]:
     if not servers:
         return all_alarms
@@ -469,6 +983,8 @@ def api_prediction(dataset: str | None = Query(default=None)) -> dict[str, Any]:
             "flags": [],
             "predicted_events": [],
             "message": "Aucune prevision disponible.",
+            "analysis_mode": "",
+            "timeline_characteristics": {},
             "risk_evolution": [],
             "behavioral_analysis": {},
             "prevention_suggestions": [],
@@ -483,6 +999,8 @@ def api_prediction(dataset: str | None = Query(default=None)) -> dict[str, Any]:
         "flags": list(prediction_event.get("flags", []) or []),
         "predicted_events": list(prediction_event.get("predicted_events", []) or []),
         "message": str(prediction_event.get("message", "")),
+        "analysis_mode": str(prediction_event.get("analysis_mode", "")),
+        "timeline_characteristics": prediction_event.get("timeline_characteristics", {}),
         "risk_evolution": [
             {"time": h["timestamp"], "risk": h["score"], "failures": 0}
             for h in prediction_event.get("history", [])
@@ -532,6 +1050,20 @@ def api_alarms(
     return _cached(cache_key, load)
 
 
+@router.get("/alarms/history")
+def api_alarm_history(
+    dataset: str | None = Query(default=None),
+    severity: str | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> dict[str, Any]:
+    cache_key = f"alarm_history::{dataset or 'default'}::{severity or 'ALL'}::{offset}::{limit}"
+    return _cached(
+        cache_key,
+        lambda: _build_alarm_history(dataset=dataset, severity=severity, offset=offset, limit=limit),
+    )
+
+
 @router.get("/engine-scores")
 def api_engine_scores(
     servers: List[str] = Query(default=[]),
@@ -552,6 +1084,14 @@ def api_engine_scores(
 @router.get("/sessions")
 def api_sessions(dataset: str | None = Query(default=None)) -> list[dict[str, Any]]:
     return _cached(f"sessions::{dataset or 'default'}", lambda: _build_sessions(_load_memory(dataset), dataset))
+
+
+@router.get("/threshold-history")
+def api_threshold_history(dataset: str | None = Query(default=None)) -> list[dict[str, Any]]:
+    return _cached(
+        f"threshold_history::{dataset or 'default'}",
+        lambda: _build_threshold_history(_load_memory(dataset), dataset),
+    )
 
 
 @router.get("/decisions")
@@ -584,6 +1124,14 @@ def api_pipeline_latest(dataset: str | None = Query(default=None)) -> dict[str, 
 @router.get("/trust")
 def api_trust(dataset: str | None = Query(default=None)) -> dict[str, Any]:
     return _cached(f"trust::{dataset or 'default'}", lambda: _build_trust(_latest_jsonl(dataset), dataset))
+
+
+@router.get("/explainability")
+def api_explainability(dataset: str | None = Query(default=None)) -> dict[str, Any]:
+    return _cached(
+        f"explainability::{dataset or 'default'}",
+        lambda: _build_explainability(_latest_jsonl(dataset), _load_memory(dataset), dataset),
+    )
 
 
 @router.get("/gate-history")

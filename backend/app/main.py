@@ -1237,6 +1237,8 @@ def _build_prediction_payload(
         "flags": flags,
         "predicted_events": list(prediction.get("predicted_events", []) or []),
         "message": str(prediction.get("message", "Prevision calculee")),
+        "analysis_mode": str(prediction.get("analysis_mode", "")),
+        "timeline_characteristics": prediction.get("timeline_characteristics", {}),
         "risk_evolution": [{"time": h["timestamp"], "risk": h["score"], "failures": 0} for h in list(history)],
         "behavioral_analysis": {
             "ssh_failures_trend": signal_analysis.get("failures", {}).get("trend_ratio", 1.0),
@@ -1411,6 +1413,8 @@ def main() -> None:
                     "flags": prediction_payload["flags"],
                     "predicted_events": prediction_payload["predicted_events"],
                     "message": prediction_payload["message"],
+                    "analysis_mode": prediction_payload.get("analysis_mode", ""),
+                    "timeline_characteristics": prediction_payload.get("timeline_characteristics", {}),
                     "signal_analysis": prediction_payload["signal_analysis"],
                     "explanations": prediction_payload["explanations"],
                     "history": prediction_payload["history"],

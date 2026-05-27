@@ -36,6 +36,35 @@ const EMPTY_SUMMARY: FusionSummary = {
   top_attackers: [],
 };
 
+function deriveSummaryFromRealData(
+  timeline: FusionTimelineEntry[],
+  attackers: FusionAttacker[],
+  riskPoints: FusionRiskPoint[],
+): FusionSummary {
+  const latestRisk = riskPoints[riskPoints.length - 1]?.risk_score ?? 0;
+  const peakRisk = riskPoints.reduce((max, point) => Math.max(max, point.risk_score), 0);
+  const averageRisk =
+    riskPoints.length > 0
+      ? Number(
+          (riskPoints.reduce((sum, point) => sum + point.risk_score, 0) / riskPoints.length).toFixed(2),
+        )
+      : 0;
+
+  return {
+    ...EMPTY_SUMMARY,
+    available: timeline.length > 0 || attackers.length > 0 || riskPoints.length > 0,
+    generated_from: "event_store",
+    attacker_count: attackers.length,
+    correlated_attacker_count: attackers.filter((attacker) => attacker.correlated_event_count > 0).length,
+    recurrent_attacker_count: attackers.filter((attacker) => attacker.recurrence_count > 0).length,
+    cluster_count: timeline.length,
+    current_risk_score: latestRisk,
+    peak_risk_score: peakRisk,
+    average_risk_score: averageRisk,
+    top_attackers: attackers.slice(0, 5),
+  };
+}
+
 export function useFusionViewModel(dataset?: string) {
   const [summary, setSummary] = useState<FusionSummary>(EMPTY_SUMMARY);
   const [timeline, setTimeline] = useState<FusionTimelineEntry[]>([]);
@@ -59,11 +88,18 @@ export function useFusionViewModel(dataset?: string) {
       return;
     }
 
-    setSummary(summaryRes ?? EMPTY_SUMMARY);
-    setTimeline(timelineRes?.timeline ?? []);
-    setAttackers(attackersRes?.attackers ?? []);
-    setRiskPoints(riskRes?.points ?? []);
-    setError(null);
+    const nextTimeline = timelineRes?.timeline ?? [];
+    const nextAttackers = attackersRes?.attackers ?? [];
+    const nextRiskPoints = riskRes?.points ?? [];
+    const nextSummary =
+      summaryRes ??
+      deriveSummaryFromRealData(nextTimeline, nextAttackers, nextRiskPoints);
+
+    setSummary(nextSummary);
+    setTimeline(nextTimeline);
+    setAttackers(nextAttackers);
+    setRiskPoints(nextRiskPoints);
+    setError(summaryRes ? null : "Fusion summary reconstructed from real event endpoints.");
     setLoading(false);
   }, [dataset]);
 

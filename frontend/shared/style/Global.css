@@ -2,98 +2,99 @@
    IDPS — SOC · GLOBAL.CSS · Dark Theme (défaut)
    ════════════════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  /* Backgrounds */
-  --bg-void:    #050810;
-  --bg-deep:    #080c1a;
-  --bg-surface: #0d1226;
-  --bg-app:     #080c1a;
+  /* ── Aurora Noir · SOC palette ─────────────────────────────────────────────
+     base #0a0c14 (carbon) · surface #141826 (deep slate) ·
+     primary #a78bfa (violet) · accent #22d3ee (cyan) · danger #f43f5e (rose) */
+  --bg-void:    #06080f;
+  --bg-deep:    #0a0c14;
+  --bg-surface: #141826;
+  --bg-app:     #0a0c14;
 
-  /* ── CRITIQUE : --card OPAQUE (pas de transparence) ──────────────────────
-     Transparence + backdrop-filter = le fond du body passe en mode light.
-     On utilise une couleur pleine pour les deux modes. */
-  --card:           #0d1226;
-  --bg-card:        #0d1226;
-  --bg-card-hover:  #111830;
-  --bg-input:       rgba(255,255,255,0.06);
-  --bg-hover:       rgba(255,255,255,0.05);
+  --card:           #141826;
+  --bg-card:        #141826;
+  --bg-card-hover:  #1a1f30;
+  --bg-input:       rgba(167,139,250,0.06);
+  --bg-hover:       rgba(167,139,250,0.07);
 
-  --color-background-secondary: #1a2040;
-  --color-background-tertiary:  #080c1a;
+  --color-background-secondary: #1a1f30;
+  --color-background-tertiary:  #0a0c14;
 
-  /* Borders */
-  --border:        rgba(108,92,231,0.2);
-  --border-light:  rgba(108,92,231,0.2);
-  --border-medium: rgba(108,92,231,0.3);
-  --border-glow:   rgba(108,92,231,0.5);
-  --border-accent: rgba(0,245,255,0.25);
-  --border-cyan:   rgba(0,245,255,0.25);
-  --border-focus:  rgba(0,245,255,0.7);
+  --border:        rgba(148,163,184,0.14);
+  --border-light:  rgba(148,163,184,0.14);
+  --border-medium: rgba(167,139,250,0.28);
+  --border-glow:   rgba(167,139,250,0.5);
+  --border-accent: rgba(34,211,238,0.28);
+  --border-cyan:   rgba(34,211,238,0.28);
+  --border-focus:  rgba(34,211,238,0.7);
+  --border-subtle: rgba(148,163,184,0.1);
+  --border-default:rgba(148,163,184,0.2);
+  --border-bright: rgba(34,211,238,0.5);
 
-  /* Text */
-  --text:           #e8f0ff;
-  --text-primary:   #e8f0ff;
+  --text:           #eef0fa;
+  --text-primary:   #eef0fa;
+  --text-secondary: #cbd5e1;
+  --text-tertiary:  #94a3b8;
+  --muted:          #64748b;
+  --text-muted:     #64748b;
 
---text-secondary: #60a5fa;
---text-tertiary:  #33c6c3;
---muted:          #37e5e5;
---text-muted:     #2dbaba;
+  --purple:        #a78bfa;
+  --purple-dim:    rgba(167,139,250,0.14);
+  --purple-glow:   rgba(167,139,250,0.32);
+  --cyan:          #22d3ee;
+  --cyan-dim:      rgba(34,211,238,0.12);
+  --cyan-glow:     rgba(34,211,238,0.28);
+  --green:         #34d399;
+  --green-dim:     rgba(52,211,153,0.14);
+  --red:           #f43f5e;
+  --red-dim:       rgba(244,63,94,0.14);
+  --amber:         #fbbf24;
+  --amber-dim:     rgba(251,191,36,0.14);
+  --blue:          #60a5fa;
+  --blue-dim:      rgba(96,165,250,0.12);
 
-  /* Accents */
-  --purple:        #6c5ce7;
-  --purple-dim:    rgba(108,92,231,0.15);
-  --purple-glow:   rgba(108,92,231,0.3);
-  --cyan:          #00f5ff;
-  --cyan-dim:      rgba(0,245,255,0.1);
-  --cyan-glow:     rgba(0,245,255,0.25);
-  --green:         #00e676;
-  --green-dim:     rgba(0,230,118,0.12);
-  --red:           #ff4d4d;
-  --red-dim:       rgba(255,77,77,0.13);
-  --amber:         #ffb74d;
-  --amber-dim:     rgba(255,183,77,0.13);
-  --blue:          #448aff;
-  --blue-dim:      rgba(68,138,255,0.12);
+  --color-critical: #f43f5e;
+  --color-danger:   #f43f5e;
+  --color-warning:  #fbbf24;
+  --color-info:     #22d3ee;
+  --color-clear:    #34d399;
+  --color-success:  #34d399;
+  --color-high:     #fbbf24;
+  --color-med:      #60a5fa;
 
-  --color-critical: #ff4d4d;
-  --color-danger:   #ff4d4d;
-  --color-warning:  #ffb74d;
-  --color-info:     #00f5ff;
-  --color-clear:    #00e676;
-  --color-success:  #00e676;
-  --color-high:     #ffb74d;
-  --color-med:      #448aff;
+  --accent-cyan:   #22d3ee;
+  --accent-green:  #34d399;
+  --accent-amber:  #fbbf24;
+  --accent-red:    #f43f5e;
+  --glow-green:    0 0 10px rgba(52,211,153,0.55);
+  --ease-snap:     cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* Shadows */
   --shadow-card:        0 8px 32px rgba(0,0,0,0.55);
-  --shadow-purple:      0 0 24px rgba(108,92,231,0.3);
-  --shadow-cyan:        0 0 20px rgba(0,245,255,0.2);
-  --shadow-red:         0 0 16px rgba(255,77,77,0.25);
+  --shadow-purple:      0 0 24px rgba(167,139,250,0.32);
+  --shadow-cyan:        0 0 20px rgba(34,211,238,0.25);
+  --shadow-red:         0 0 16px rgba(244,63,94,0.25);
   --shadow-xs:          0 1px 4px rgba(0,0,0,0.4);
   --shadow-sm:          0 2px 8px rgba(0,0,0,0.5);
-  --shadow-glow-cyan:   0 0 20px rgba(0,245,255,0.2);
-  --shadow-glow-purple: 0 0 20px rgba(108,92,231,0.3);
+  --shadow-glow-cyan:   0 0 20px rgba(34,211,238,0.25);
+  --shadow-glow-purple: 0 0 20px rgba(167,139,250,0.3);
 
-  /* Layout */
   --sidebar-width: 220px;
   --sidebar-w:     220px;
   --sidebar-w-col: 62px;
   --topbar-height: 56px;
   --topbar-h:      56px;
 
-  /* Radius */
   --radius-xs: 4px; --radius-sm: 6px;
   --radius-md: 10px; --radius-lg: 14px; --radius-xl: 20px;
 
-  /* Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-sans:    'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Space Grotesk', 'DM Sans', sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
 
-  /* Transitions */
   --t-fast: 0.13s ease; --t-base: 0.25s ease; --t-slow: 0.45s ease;
   --transition-fast: 0.13s ease; --transition-base: 0.25s ease;
   --t-sidebar: 0.28s cubic-bezier(0.4,0,0.2,1);
@@ -110,9 +111,15 @@ body {
   overflow: hidden;
   height: 100vh;
   background-image:
-    radial-gradient(ellipse at 15% 25%, rgba(108,92,231,0.1) 0%, transparent 55%),
-    radial-gradient(ellipse at 85% 75%, rgba(0,245,255,0.07) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 50%, #080c1a 0%, #050810 100%);
+    radial-gradient(ellipse at 12% 20%, rgba(167,139,250,0.10) 0%, transparent 55%),
+    radial-gradient(ellipse at 88% 80%, rgba(34,211,238,0.08) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 50%, #0a0c14 0%, #06080f 100%);
+}
+
+h1, h2, h3, h4, h5, h6,
+.sidebar__brand-name, .topbar__title, .chart-title, .kpi-premium__value {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
 }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
