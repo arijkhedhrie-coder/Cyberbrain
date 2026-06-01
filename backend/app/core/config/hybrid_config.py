@@ -144,12 +144,24 @@ class DynamicConfig:
         parts = []
         if self.ssh_high_risk_threshold is not None:
             parts.append(f"SSH_thresh={self.ssh_high_risk_threshold}")
+        if self.ssh_med_risk_threshold is not None:
+            parts.append(f"SSH_med={self.ssh_med_risk_threshold}")
         if self.web_high_risk_threshold is not None:
             parts.append(f"WEB_thresh={self.web_high_risk_threshold}")
+        if self.web_med_risk_threshold is not None:
+            parts.append(f"WEB_med={self.web_med_risk_threshold}")
         if self.ftp_high_risk_threshold is not None:
             parts.append(f"FTP_thresh={self.ftp_high_risk_threshold}")
+        if self.ftp_med_risk_threshold is not None:
+            parts.append(f"FTP_med={self.ftp_med_risk_threshold}")
+        if self.kernel_high_risk_threshold is not None:
+            parts.append(f"KERNEL_thresh={self.kernel_high_risk_threshold}")
         if self.session_high_risk_threshold is not None:
             parts.append(f"SESSION_thresh={self.session_high_risk_threshold}")
+        if self.session_med_risk_threshold is not None:
+            parts.append(f"SESSION_med={self.session_med_risk_threshold}")
+        if self.correlation_window_min is not None:
+            parts.append(f"window={self.correlation_window_min}")
         if self.escalate_ips:
             parts.append(f"escalate={self.escalate_ips}")
         if self.suppress_ips:
@@ -176,13 +188,49 @@ def _parse_plain_text_config(text: str) -> dict[str, Any]:
         result["threat_level"] = "ELEVATED"
 
     # Threshold hints
-    m = re.search(r'ssh.*?threshold.*?(\d+\.?\d*)', text, re.I)
-    if m:
-        result["ssh_high_risk_threshold"] = float(m.group(1))
+    def _match_threshold(engine: str, *, high: bool) -> float | None:
+        engine_pat = re.escape(engine)
+        if high:
+            patterns = [
+                rf"{engine_pat}.*?(?:high|threshold|block).*?(\d+\.?\d*)",
+                rf"(?:high|threshold|block).*?{engine_pat}.*?(\d+\.?\d*)",
+            ]
+        else:
+            patterns = [
+                rf"{engine_pat}.*?(?:med|medium|watchlist).*?(\d+\.?\d*)",
+                rf"(?:med|medium|watchlist).*?{engine_pat}.*?(\d+\.?\d*)",
+            ]
 
-    m = re.search(r'ftp.*?threshold.*?(\d+\.?\d*)', text, re.I)
+        for pattern in patterns:
+            m = re.search(pattern, text, re.I)
+            if m:
+                try:
+                    return float(m.group(1))
+                except (ValueError, TypeError):
+                    return None
+        return None
+
+    for engine, field_high, field_med in (
+        ("ssh", "ssh_high_risk_threshold", "ssh_med_risk_threshold"),
+        ("web", "web_high_risk_threshold", "web_med_risk_threshold"),
+        ("ftp", "ftp_high_risk_threshold", "ftp_med_risk_threshold"),
+        ("kernel", "kernel_high_risk_threshold", None),
+        ("session", "session_high_risk_threshold", "session_med_risk_threshold"),
+    ):
+        high_value = _match_threshold(engine, high=True)
+        if high_value is not None:
+            result[field_high] = high_value
+        if field_med is not None:
+            med_value = _match_threshold(engine, high=False)
+            if med_value is not None:
+                result[field_med] = med_value
+
+    m = re.search(r'window.*?(\d+\.?\d*)', text, re.I)
     if m:
-        result["ftp_high_risk_threshold"] = float(m.group(1))
+        try:
+            result["correlation_window_min"] = float(m.group(1))
+        except (ValueError, TypeError):
+            pass
 
     # IP addresses to escalate
     ips = re.findall(r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', text)

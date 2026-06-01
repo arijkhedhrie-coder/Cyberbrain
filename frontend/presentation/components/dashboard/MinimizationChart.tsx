@@ -97,9 +97,9 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         boxShadow: "0 18px 40px rgba(2,6,23,0.34)",
       }}
     >
-      <div style={{ color: "#cbd5e1", fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{label}</div>
-      <div style={{ color: "#fda4af", fontSize: 12, marginBottom: 4 }}>Alertes finales : {alarms ?? 0}</div>
-      <div style={{ color: "#6ee7b7", fontSize: 12 }}>Risque restant : {risk ?? 0}%</div>
+      <div style={{ color: "#cbd5e1", fontSize: 14, fontWeight: 700, marginBottom: 6 }}>{label}</div>
+      <div style={{ color: "#fda4af", fontSize: 14, marginBottom: 4 }}>Alertes finales : {alarms ?? 0}</div>
+      <div style={{ color: "#6ee7b7", fontSize: 14 }}>Risque restant : {risk ?? 0}%</div>
     </div>
   );
 };
@@ -188,9 +188,9 @@ export default function MinimizationChart({
       {!embedded && (
         <div className="chart-header" style={{ alignItems: "flex-start", marginBottom: 18 }}>
           <div style={{ display: "grid", gap: 6 }}>
-            <span className="chart-title">Evolution de la reduction des alertes</span>
-            <span style={{ fontSize: 12, color: "#8ba5c0", lineHeight: 1.5 }}>
-              Alertes finales et risque restant sur les derniers passages enregistres.
+            <span className="chart-title">Evolution du risque</span>
+            <span style={{ fontSize: 14, color: "#8ba5c0", lineHeight: 1.5 }}>
+              Chaque point represente un passage enregistre, avec ses alertes et son risque restant.
             </span>
           </div>
 
@@ -203,7 +203,7 @@ export default function MinimizationChart({
                   border: `1px solid ${trend.color}33`,
                   background: `${trend.color}14`,
                   color: trend.color,
-                  fontSize: 10,
+                  fontSize: 12,
                   fontWeight: 700,
                   letterSpacing: "0.08em",
                 }}
@@ -219,7 +219,7 @@ export default function MinimizationChart({
                   border: "1px solid rgba(148,163,184,0.18)",
                   background: sourceVisual.bg,
                   color: sourceVisual.color,
-                  fontSize: 10,
+                  fontSize: 12,
                   fontWeight: 700,
                   letterSpacing: "0.08em",
                 }}
@@ -241,7 +241,7 @@ export default function MinimizationChart({
                 border: `1px solid ${trend.color}33`,
                 background: `${trend.color}14`,
                 color: trend.color,
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: 700,
                 letterSpacing: "0.08em",
               }}
@@ -257,7 +257,7 @@ export default function MinimizationChart({
                 border: "1px solid rgba(148,163,184,0.18)",
                 background: sourceVisual.bg,
                 color: sourceVisual.color,
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: 700,
                 letterSpacing: "0.08em",
               }}
@@ -284,8 +284,8 @@ export default function MinimizationChart({
             { label: "Risque le plus bas", value: `${lowestRisk}%`, tone: "#7dd3fc" },
           ].map((item) => (
             <div key={item.label} style={metricTileStyle}>
-              <div style={{ fontSize: 11, color: "#7c8fa1", marginBottom: 8 }}>{item.label}</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: item.tone }}>{item.value}</div>
+              <div style={{ fontSize: 13, color: "#7c8fa1", marginBottom: 8 }}>{item.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: item.tone }}>{item.value}</div>
             </div>
           ))}
         </div>
@@ -323,13 +323,13 @@ export default function MinimizationChart({
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.08)" />
             <XAxis
               dataKey="timestamp"
-              tick={{ fill: "#64748b", fontSize: 11 }}
+              tick={{ fill: "#64748b", fontSize: 13 }}
               axisLine={{ stroke: "rgba(148,163,184,0.12)" }}
               tickLine={false}
               interval="preserveStartEnd"
             />
             <YAxis
-              tick={{ fill: "#64748b", fontSize: 11 }}
+              tick={{ fill: "#64748b", fontSize: 13 }}
               axisLine={{ stroke: "rgba(148,163,184,0.12)" }}
               tickLine={false}
               allowDecimals={false}
@@ -338,7 +338,7 @@ export default function MinimizationChart({
             <Legend
               verticalAlign="top"
               align="right"
-              wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
+              wrapperStyle={{ fontSize: 13, paddingBottom: 8 }}
               formatter={(value) => (
                 <span style={{ color: "#94a3b8" }}>
                   {value === "alarmes" ? "Alertes finales" : "Risque restant"}
@@ -349,7 +349,7 @@ export default function MinimizationChart({
               y={10}
               stroke="#fbbf24"
               strokeDasharray="4 4"
-              label={{ value: "Seuil critique", fill: "#fbbf24", fontSize: 10, position: "right" }}
+              label={{ value: "Seuil critique", fill: "#fbbf24", fontSize: 12, position: "right" }}
             />
             <Area
               type="monotone"

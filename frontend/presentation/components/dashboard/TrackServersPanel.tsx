@@ -89,7 +89,7 @@ const SevBadge: FC<{ sev: string }> = ({ sev }) => {
       display: "inline-flex", alignItems: "center", gap: 4,
       padding: "2px 7px", borderRadius: 20,
       background: c.bg, color: c.text,
-      fontSize: 10, fontWeight: 600, fontFamily: "monospace", whiteSpace: "nowrap",
+      fontSize: 12, fontWeight: 600, fontFamily: "monospace", whiteSpace: "nowrap",
     }}>
       <span style={{ width: 5, height: 5, borderRadius: "50%", background: c.dot, flexShrink: 0 }} />
       {sev}
@@ -250,14 +250,14 @@ export const TrackServersPanel: FC<Props> = ({
             border: "1px solid rgba(125,211,252,0.22)",
             fontWeight: 700,
             letterSpacing: "0.08em",
-            fontSize: 10,
+            fontSize: 12,
             fontFamily: "'JetBrains Mono', monospace",
           }}>
-            FUSION TRACK · ANALYSIS ONLY
+            VUE CONSOLIDEE · LECTURE SEULE
           </div>
-          <div style={{ fontSize: 12, lineHeight: 1.5 }}>
-            This view correlates and ranks signals across datasets. It never blocks IPs, modifies thresholds,
-            retrains models, or triggers corrective execution.
+          <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+            Cette vue regroupe et classe les signaux de plusieurs serveurs. Elle ne bloque jamais une IP, ne
+            modifie pas les seuils, ne relance pas les modeles et ne lance aucune action corrective.
           </div>
         </div>
       )}
@@ -266,7 +266,7 @@ export const TrackServersPanel: FC<Props> = ({
       {serversLoading ? (
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "center",
-          height: 120, fontSize: 12, color: "var(--muted, #6b7280)",
+          height: 120, fontSize: 14, color: "var(--muted, #6b7280)",
         }}>
           Chargement des serveurs depuis le backend…
         </div>
@@ -276,11 +276,11 @@ export const TrackServersPanel: FC<Props> = ({
           background: "var(--card, #fff)", borderRadius: 8,
           border: "0.5px solid var(--border, #e5e7eb)",
         }}>
-          <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
+          <div style={{ fontSize: 30, marginBottom: 12 }}>🔍</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
             Aucun serveur détecté
           </div>
-          <div style={{ fontSize: 11, color: "var(--muted, #6b7280)", maxWidth: 320, margin: "0 auto" }}>
+          <div style={{ fontSize: 13, color: "var(--muted, #6b7280)", maxWidth: 320, margin: "0 auto" }}>
             Les serveurs seront détectés automatiquement quand le pipeline commencera à traiter les fichiers logs.
           </div>
         </div>
@@ -291,12 +291,12 @@ export const TrackServersPanel: FC<Props> = ({
             display: "flex", alignItems: "center", justifyContent: "space-between",
             flexWrap: "wrap", gap: 8,
           }}>
-            <div style={{ fontSize: 11, color: "var(--muted, #6b7280)" }}>
+            <div style={{ fontSize: 13, color: "var(--muted, #6b7280)" }}>
               <b style={{ color: "var(--text)" }}>{selectedLabels.size}</b> / {mergedServers.length} serveur{mergedServers.length > 1 ? "s" : ""} sélectionné{selectedLabels.size > 1 ? "s" : ""}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={selectAll} style={{
-                fontSize: 10, padding: "3px 10px", borderRadius: 20,
+                fontSize: 12, padding: "3px 10px", borderRadius: 20,
                 border: "0.5px solid var(--border, #e5e7eb)",
                 cursor: "pointer", background: "transparent",
                 color: "var(--muted, #6b7280)", fontFamily: "inherit",
@@ -304,7 +304,7 @@ export const TrackServersPanel: FC<Props> = ({
                 Tout sélectionner
               </button>
               <button onClick={selectNone} style={{
-                fontSize: 10, padding: "3px 10px", borderRadius: 20,
+                fontSize: 12, padding: "3px 10px", borderRadius: 20,
                 border: "0.5px solid var(--border, #e5e7eb)",
                 cursor: "pointer", background: "transparent",
                 color: "var(--muted, #6b7280)", fontFamily: "inherit",
@@ -357,25 +357,25 @@ export const TrackServersPanel: FC<Props> = ({
                     background: isSelected ? color : "transparent",
                     border:     `1.5px solid ${isSelected ? color : "var(--border, #e5e7eb)"}`,
                     display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 10, color: "#fff", fontWeight: 700,
+                    fontSize: 12, color: "#fff", fontWeight: 700,
                     transition: "all .18s",
                   }}>
                     {isSelected ? "✓" : ""}
                   </div>
 
                   {/* Icône + titre */}
-                  <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginBottom: 2 }}>
+                  <div style={{ fontSize: 24, marginBottom: 6 }}>{icon}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginBottom: 2 }}>
                     {srv.display}
                   </div>
-                  <div style={{ fontSize: 10, color: "var(--muted, #6b7280)", marginBottom: 8, fontFamily: "monospace" }}>
+                  <div style={{ fontSize: 12, color: "var(--muted, #6b7280)", marginBottom: 8, fontFamily: "monospace" }}>
                     {desc}
                   </div>
 
                   {/* Stats alarmes */}
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <span style={{
-                      fontSize: 10, padding: "2px 7px", borderRadius: 20, fontFamily: "monospace",
+                      fontSize: 12, padding: "2px 7px", borderRadius: 20, fontFamily: "monospace",
                       background: hasAlarm ? "rgba(226,75,74,0.12)" : "rgba(29,158,117,0.1)",
                       color:      hasAlarm ? "#E24B4A" : "#1D9E75",
                       fontWeight: 600,
@@ -384,7 +384,7 @@ export const TrackServersPanel: FC<Props> = ({
                     </span>
                     {critCount > 0 && (
                       <span style={{
-                        fontSize: 10, padding: "2px 7px", borderRadius: 20, fontFamily: "monospace",
+                        fontSize: 12, padding: "2px 7px", borderRadius: 20, fontFamily: "monospace",
                         background: "rgba(226,75,74,0.18)", color: "#E24B4A", fontWeight: 700,
                       }}>
                         {critCount} CRITIQUE{critCount > 1 ? "S" : ""}
@@ -392,7 +392,7 @@ export const TrackServersPanel: FC<Props> = ({
                     )}
                     {serverAlarms.length === 0 && (
                       <span style={{
-                        fontSize: 10, padding: "2px 7px", borderRadius: 20,
+                        fontSize: 12, padding: "2px 7px", borderRadius: 20,
                         background: "rgba(29,158,117,0.1)", color: "#1D9E75", fontFamily: "monospace",
                       }}>
                         ✓ OK
@@ -401,7 +401,7 @@ export const TrackServersPanel: FC<Props> = ({
                   </div>
 
                   {/* Label métier + ID source (petit) */}
-                  <div style={{ marginTop: 8, fontSize: 9, color: "var(--muted, #6b7280)", opacity: 0.65 }}>
+                  <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted, #6b7280)", opacity: 0.65 }}>
                     <span style={{ fontFamily: "monospace" }}>label:</span> {srv.label}
                     {" · "}
                     <span style={{ fontFamily: "monospace" }}>src:</span> {srv.sources.length} fichier{srv.sources.length > 1 ? "s" : ""}
@@ -421,7 +421,7 @@ export const TrackServersPanel: FC<Props> = ({
           borderRadius: 8, padding: "12px 16px",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", flex: 1 }}>
               {selectedLabels.size === 0
                 ? "Aucun serveur sélectionné"
                 : Array.from(selectedLabels)
@@ -429,7 +429,7 @@ export const TrackServersPanel: FC<Props> = ({
                     .join(" + ")}
             </div>
             <span style={{
-              fontSize: 10, padding: "2px 8px", borderRadius: 20, fontFamily: "monospace",
+              fontSize: 12, padding: "2px 8px", borderRadius: 20, fontFamily: "monospace",
               background: wsConnected ? "rgba(29,158,117,0.1)" : "rgba(226,75,74,0.1)",
               color: wsConnected ? "#1D9E75" : "#E24B4A",
               display: "flex", alignItems: "center", gap: 4,
@@ -444,7 +444,7 @@ export const TrackServersPanel: FC<Props> = ({
             </span>
           </div>
 
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11, color: "var(--muted, #6b7280)" }}>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13, color: "var(--muted, #6b7280)" }}>
             <span>Lignes : <b style={{ color: "var(--text)", fontFamily: "monospace" }}>{(kpis?.row_count ?? 0).toLocaleString()}</b></span>
             <span>Dédup : <b style={{ color: "var(--text)", fontFamily: "monospace" }}>{(kpis?.deduped_count ?? 0).toLocaleString()}</b></span>
             <span>Bruit : <b style={{ color: "var(--text)", fontFamily: "monospace" }}>{kpis?.noise_ratio != null ? `${(kpis.noise_ratio * 100).toFixed(1)}%` : "—"}</b></span>
@@ -470,10 +470,10 @@ export const TrackServersPanel: FC<Props> = ({
           padding: "10px 14px", borderBottom: "0.5px solid var(--border, #e5e7eb)",
           flexWrap: "wrap", gap: 8,
         }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>
-            {isFusionView ? "Table dynamique — Signaux fusion" : "Table dynamique — Alarmes réelles"}
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+            {isFusionView ? "Table dynamique — Signaux consolides" : "Table dynamique — Alarmes reelles"}
             <span style={{
-              marginLeft: 8, fontSize: 10, padding: "1px 7px", borderRadius: 20,
+              marginLeft: 8, fontSize: 12, padding: "1px 7px", borderRadius: 20,
               background: filtered.length > 0 ? "rgba(226,75,74,0.12)" : "rgba(29,158,117,0.1)",
               color: filtered.length > 0 ? "#E24B4A" : "#1D9E75",
               fontFamily: "monospace", fontWeight: 600,
@@ -488,7 +488,7 @@ export const TrackServersPanel: FC<Props> = ({
               onChange={e => setSearchIp(e.target.value)}
               placeholder="Filtrer IP…"
               style={{
-                padding: "4px 10px", borderRadius: 6, fontSize: 11, fontFamily: "monospace",
+                padding: "4px 10px", borderRadius: 6, fontSize: 13, fontFamily: "monospace",
                 background: "var(--color-background-secondary, #f3f4f6)",
                 border: "0.5px solid var(--border, #e5e7eb)",
                 color: "var(--text)", outline: "none", width: 120,
@@ -499,7 +499,7 @@ export const TrackServersPanel: FC<Props> = ({
                 key={f}
                 onClick={() => setSevFilter(f)}
                 style={{
-                  fontSize: 9, padding: "3px 9px", borderRadius: 20, cursor: "pointer",
+                  fontSize: 11, padding: "3px 9px", borderRadius: 20, cursor: "pointer",
                   fontFamily: "monospace", fontWeight: 600,
                   background:  sevFilter === f ? (SEV_COLOR[f]?.bg ?? "rgba(29,158,117,0.1)") : "transparent",
                   color:       sevFilter === f ? (SEV_COLOR[f]?.text ?? "#1D9E75") : "var(--muted, #6b7280)",
@@ -515,32 +515,32 @@ export const TrackServersPanel: FC<Props> = ({
         {/* Contenu table */}
         <div style={{ overflowX: "auto", maxHeight: 340, overflowY: "auto" }}>
           {filtered.length === 0 ? (
-            <div style={{ padding: "24px", textAlign: "center", color: "var(--muted, #6b7280)", fontSize: 12 }}>
+            <div style={{ padding: "24px", textAlign: "center", color: "var(--muted, #6b7280)", fontSize: 14 }}>
               {loading ? "Chargement…"
                 : selectedLabels.size === 0 ? "Sélectionnez au moins un serveur pour voir les alarmes."
                 : "✅ Aucune alarme pour les serveurs sélectionnés"}
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "var(--color-background-secondary, #f3f4f6)" }}>
                   {([
-                    ["timestamp", "Timestamp"],
-                    ...(isFusionView ? [["dataset_id", "Dataset"]] as [keyof AlarmItem, string][] : []),
-                    ["source_ip", "IP Source"],
-                    ["engine",    "Engine"],
-                    ["severity",  "Sévérité"],
+                    ["timestamp", "Horodatage"],
+                    ...(isFusionView ? [["dataset_id", "Source"]] as [keyof AlarmItem, string][] : []),
+                    ["source_ip", "IP source"],
+                    ["engine",    "Moteur"],
+                    ["severity",  "Gravite"],
                     ["score",     "Score"],
-                    ...(!isFusionView ? [["action", "Action"]] as [keyof AlarmItem, string][] : []),
+                    ...(!isFusionView ? [["action", "Reponse"]] as [keyof AlarmItem, string][] : []),
                     ["type",      "Type"],
-                    ["failures",  "Failures"],
+                    ["failures",  "Echecs"],
                     ["message",   "Message"],
                   ] as [keyof AlarmItem, string][]).map(([field, label]) => (
                     <th
                       key={field}
                       onClick={() => handleSort(field)}
                       style={{
-                        padding: "6px 10px", textAlign: "left", fontSize: 10,
+                        padding: "6px 10px", textAlign: "left", fontSize: 12,
                         color: "var(--muted, #6b7280)", fontWeight: 600,
                         cursor: "pointer", whiteSpace: "nowrap",
                         borderBottom: "0.5px solid var(--border, #e5e7eb)",
@@ -548,7 +548,7 @@ export const TrackServersPanel: FC<Props> = ({
                       }}
                     >
                       {label}
-                      <span style={{ marginLeft: 3, opacity: sortField === field ? 1 : 0.3, fontSize: 8 }}>
+                      <span style={{ marginLeft: 3, opacity: sortField === field ? 1 : 0.3, fontSize: 10 }}>
                         {sortField === field ? (sortAsc ? "▲" : "▼") : "▼"}
                       </span>
                     </th>
@@ -561,28 +561,28 @@ export const TrackServersPanel: FC<Props> = ({
                     key={row.id ?? i}
                     style={{ background: i % 2 === 0 ? "transparent" : "var(--color-background-secondary, #f3f4f6)" }}
                   >
-                    <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 10, whiteSpace: "nowrap", color: "var(--muted, #6b7280)" }}>{row.timestamp}</td>
+                    <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 12, whiteSpace: "nowrap", color: "var(--muted, #6b7280)" }}>{row.timestamp}</td>
                     {isFusionView && (
-                      <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 10, whiteSpace: "nowrap", color: "#0C447C" }}>
-                        {row.dataset_id ?? "fusion"}
+                      <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 12, whiteSpace: "nowrap", color: "#0C447C" }}>
+                        {row.dataset_id ?? "consolide"}
                       </td>
                     )}
-                    <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 10, whiteSpace: "nowrap", color: "var(--text)" }}>{row.source_ip}</td>
+                    <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 12, whiteSpace: "nowrap", color: "var(--text)" }}>{row.source_ip}</td>
                     <td style={{ padding: "6px 10px" }}>
-                      <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text)" }}>{row.engine}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{row.engine}</span>
                     </td>
                     <td style={{ padding: "6px 10px" }}><SevBadge sev={row.severity} /></td>
-                    <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 11, fontWeight: 600, textAlign: "right", color: (row.score ?? 0) > 70 ? "#E24B4A" : "var(--text)" }}>
+                    <td style={{ padding: "6px 10px", fontFamily: "monospace", fontSize: 13, fontWeight: 600, textAlign: "right", color: (row.score ?? 0) > 70 ? "#E24B4A" : "var(--text)" }}>
                       {row.score?.toFixed(1) ?? "—"}
                     </td>
                     {!isFusionView && (
                       <td style={{ padding: "6px 10px" }}>
-                        <span style={{ fontSize: 10, fontWeight: 600, fontFamily: "monospace", color: ACTION_COLOR[row.action] ?? "var(--text)" }}>{row.action ?? "—"}</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "monospace", color: ACTION_COLOR[row.action] ?? "var(--text)" }}>{row.action ?? "—"}</span>
                       </td>
                     )}
-                    <td style={{ padding: "6px 10px", color: "var(--text)", fontSize: 10, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.type ?? "—"}</td>
+                    <td style={{ padding: "6px 10px", color: "var(--text)", fontSize: 12, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.type ?? "—"}</td>
                     <td style={{ padding: "6px 10px", textAlign: "right", fontFamily: "monospace", color: (row.failures ?? 0) > 50 ? "#E24B4A" : "var(--text)" }}>{row.failures ?? 0}</td>
-                    <td style={{ padding: "6px 10px", color: "var(--muted, #6b7280)", fontSize: 10, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.message}>
+                    <td style={{ padding: "6px 10px", color: "var(--muted, #6b7280)", fontSize: 12, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.message}>
                       {row.message || row.human_insight || "—"}
                     </td>
                   </tr>
@@ -596,13 +596,13 @@ export const TrackServersPanel: FC<Props> = ({
           <div style={{
             padding: "6px 14px", borderTop: "0.5px solid var(--border, #e5e7eb)",
             display: "flex", alignItems: "center", justifyContent: "space-between",
-            fontSize: 10, color: "var(--muted, #6b7280)",
+            fontSize: 12, color: "var(--muted, #6b7280)",
           }}>
             <span>{filtered.length} ligne{filtered.length !== 1 ? "s" : ""} affichée{filtered.length !== 1 ? "s" : ""}</span>
             <span>
               {isFusionView
-                ? "timestamp · dataset · IP_Source · engine · severity · score · type · failures · message"
-                : "timestamp · IP_Source · engine · severity · score · action · type · failures · message"}
+                ? "horodatage · source · IP source · moteur · gravite · score · type · echecs · message"
+                : "horodatage · IP source · moteur · gravite · score · action · type · echecs · message"}
             </span>
           </div>
         )}

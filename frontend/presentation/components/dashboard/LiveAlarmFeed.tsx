@@ -30,6 +30,14 @@ const actionStyle = (action: string): React.CSSProperties => {
   return { background: "var(--color-background-secondary, #f3f4f6)", color: "var(--muted, #6b7280)" };
 };
 
+const actionLabel = (action: string): string => {
+  const normalized = action.toUpperCase();
+  if (normalized.includes("BLOCK")) return "BLOCAGE";
+  if (normalized.includes("WATCH")) return "SURVEILLANCE";
+  if (normalized.includes("ESCALATE")) return "ESCALADE";
+  return "ACTION";
+};
+
 export const LiveAlarmFeed: FC<Props> = ({ alerts, wsConnected }) => (
   <div style={{
     background: "var(--card, #fff)",
@@ -38,9 +46,9 @@ export const LiveAlarmFeed: FC<Props> = ({ alerts, wsConnected }) => (
   }}>
     {/* Header avec badge WS dynamique */}
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-      <span style={{ fontSize: 11, fontWeight: 500 }}>Live Alarm Feed</span>
+      <span style={{ fontSize: 13, fontWeight: 500 }}>Flux d'alertes en direct</span>
       <span style={{
-        fontSize: 10, padding: "2px 6px", borderRadius: 4, fontWeight: 500,
+        fontSize: 12, padding: "2px 6px", borderRadius: 4, fontWeight: 500,
         display: "flex", alignItems: "center", gap: 4,
         background: wsConnected ? "#E1F5EE" : "#FCEBEB",
         color:      wsConnected ? "#085041" : "#A32D2D",
@@ -57,8 +65,8 @@ export const LiveAlarmFeed: FC<Props> = ({ alerts, wsConnected }) => (
 
     {/* Liste alarmes */}
     {alerts.length === 0 ? (
-      <div style={{ fontSize: 11, color: "var(--muted, #6b7280)", padding: "12px 0", textAlign: "center" }}>
-        {wsConnected ? "Aucune alarme — système clean ✓" : "En attente du pipeline…"}
+      <div style={{ fontSize: 13, color: "var(--muted, #6b7280)", padding: "12px 0", textAlign: "center" }}>
+        {wsConnected ? "Aucune alerte — système calme ✓" : "En attente du pipeline…"}
       </div>
     ) : (
       alerts.slice(0, 8).map((a, i) => (
@@ -76,29 +84,29 @@ export const LiveAlarmFeed: FC<Props> = ({ alerts, wsConnected }) => (
             marginTop: 4, flexShrink: 0,
           }}/>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {a.type.replace(/_/g, " ")} — {a.severity}
             </div>
-            <div style={{ fontSize: 10, color: "var(--muted, #6b7280)", fontFamily: "monospace" }}>
+            <div style={{ fontSize: 12, color: "var(--muted, #6b7280)", fontFamily: "monospace" }}>
               {a.source_ip} · score {a.score} · {a.engine}
             </div>
             {a.human_insight && (
               <div style={{
-                fontSize: 10, color: "var(--muted, #6b7280)", marginTop: 2,
+                fontSize: 12, color: "var(--muted, #6b7280)", marginTop: 2,
                 fontStyle: "italic", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }} title={a.human_insight}>
                 {a.human_insight.slice(0, 65)}{a.human_insight.length > 65 ? "…" : ""}
               </div>
             )}
           </div>
-          <div style={{ fontSize: 10, color: "var(--muted, #6b7280)", flexShrink: 0 }}>
+          <div style={{ fontSize: 12, color: "var(--muted, #6b7280)", flexShrink: 0 }}>
             {a.timestamp}
           </div>
           <span style={{
-            fontSize: 10, padding: "2px 6px", borderRadius: 3,
+            fontSize: 12, padding: "2px 6px", borderRadius: 3,
             fontWeight: 500, flexShrink: 0, ...actionStyle(a.action),
           }}>
-            {a.action.split("_")[0]}
+            {actionLabel(a.action)}
           </span>
         </div>
       ))
@@ -106,7 +114,7 @@ export const LiveAlarmFeed: FC<Props> = ({ alerts, wsConnected }) => (
 
     {alerts.length > 8 && (
       <div style={{
-        fontSize: 10, color: "var(--muted, #6b7280)", textAlign: "center",
+        fontSize: 12, color: "var(--muted, #6b7280)", textAlign: "center",
         marginTop: 8, paddingTop: 6, borderTop: "0.5px solid var(--border, #e5e7eb)",
       }}>
         +{alerts.length - 8} alarmes supplémentaires

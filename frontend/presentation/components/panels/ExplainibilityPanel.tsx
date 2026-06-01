@@ -1,4 +1,6 @@
 import type { ExplainabilityPanelProps } from "../../../shared/types/analyticsProps";
+import { getEngineTooltip, getMetricTooltip } from "../../../shared/constants/dashboardTooltips";
+import { TooltipLabel } from "../common/TooltipLabel";
 
 const formatTime = (value?: string | null): string => {
   if (!value) return "N/D";
@@ -35,7 +37,7 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
         <div className="chart-header">
           <span className="chart-title">Pourquoi cette decision</span>
         </div>
-        <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.7 }}>
+        <div style={{ fontSize: 14, color: "#94a3b8", lineHeight: 1.7 }}>
           Aucune explication detaillee n'est encore disponible pour cette source.
         </div>
       </div>
@@ -67,7 +69,7 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
               style={{
                 padding: "4px 10px",
                 borderRadius: 999,
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: 700,
                 background: severity.bg,
                 color: severity.color,
@@ -80,7 +82,7 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
               style={{
                 padding: "4px 10px",
                 borderRadius: 999,
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: 700,
                 background: "rgba(125,211,252,0.1)",
                 color: "#7dd3fc",
@@ -103,8 +105,8 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
             textAlign: "right",
           }}
         >
-          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 6 }}>ACCORD ENTRE MODELES</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "#e2e8f0" }}>{agreementPct}%</div>
+          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>ACCORD ENTRE MODELES</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: "#e2e8f0" }}>{agreementPct}%</div>
         </div>
       </div>
 
@@ -124,14 +126,18 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
             border: "1px solid rgba(148,163,184,0.12)",
           }}
         >
-          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 8 }}>RESUME</div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>RESUME</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>
             {topAlarm ? `${topAlarm.action} sur ${topAlarm.source_ip}` : "Aucune alerte selectionnee"}
           </div>
-          <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.75 }}>{data.summary}</div>
+          <div style={{ fontSize: 14, color: "#94a3b8", lineHeight: 1.75 }}>{data.summary}</div>
           {topAlarm && (
-            <div style={{ marginTop: 10, fontSize: 11, color: "#64748b", lineHeight: 1.6 }}>
-              Moteur {topAlarm.engine} · Score {topAlarm.score.toFixed(1)} · {formatTime(topAlarm.timestamp)}
+            <div style={{ marginTop: 10, fontSize: 13, color: "#64748b", lineHeight: 1.6 }}>
+              Moteur{" "}
+              <span title={getEngineTooltip(topAlarm.engine)} style={{ cursor: "help" }}>
+                {topAlarm.engine}
+              </span>
+              · Score {topAlarm.score.toFixed(1)} · {formatTime(topAlarm.timestamp)}
             </div>
           )}
         </div>
@@ -147,13 +153,15 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
           }}
         >
           {[
-            ["Confiance", data.model_context.trust_label],
-            ["Ecart", data.model_context.drift_label],
-            ["Stabilite", data.model_context.stability],
-            ["Portee", data.dataset_scope.toUpperCase()],
-          ].map(([label, value]) => (
-            <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11 }}>
-              <span style={{ color: "#64748b" }}>{label}</span>
+            ["Confiance", data.model_context.trust_label, getMetricTooltip("confidence")],
+            ["Ecart", data.model_context.drift_label, getMetricTooltip("drift")],
+            ["Stabilite", data.model_context.stability, getMetricTooltip("stability")],
+            ["Portee", data.dataset_scope.toUpperCase(), null],
+          ].map(([label, value, tooltip]) => (
+            <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13 }}>
+              <span style={{ color: "#64748b" }}>
+                {tooltip ? <TooltipLabel tooltip={tooltip} style={{ gap: 4 }}>{label}</TooltipLabel> : label}
+              </span>
               <span style={{ color: "#e2e8f0", fontWeight: 700, textAlign: "right" }}>{value}</span>
             </div>
           ))}
@@ -162,7 +170,7 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
 
       {evidence.length > 0 && (
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#64748b", marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.08em", color: "#64748b", marginBottom: 10 }}>
             SIGNAUX CLES
           </div>
           <div style={{ display: "grid", gap: 10 }}>
@@ -180,11 +188,11 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
                   alignItems: "center",
                 }}
               >
-                <div style={{ fontSize: 11, color: "#e2e8f0", fontWeight: 700 }}>{item.label}</div>
-                <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6 }}>{item.detail}</div>
+                <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 700 }}>{item.label}</div>
+                <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>{item.detail}</div>
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 12, color: "#7dd3fc", fontWeight: 700 }}>{item.value}</div>
-                  <div style={{ fontSize: 9, color: "#64748b" }}>{item.weight.toFixed(0)}</div>
+                  <div style={{ fontSize: 14, color: "#7dd3fc", fontWeight: 700 }}>{item.value}</div>
+                  <div style={{ fontSize: 11, color: "#64748b" }}>{item.weight.toFixed(0)}</div>
                 </div>
               </div>
             ))}
@@ -201,22 +209,24 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
             border: "1px solid rgba(148,163,184,0.12)",
           }}
         >
-          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 8 }}>CONTEXTE DES SEUILS</div>
+          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>CONTEXTE DES SEUILS</div>
           {data.threshold_context ? (
             <>
-              <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 700, marginBottom: 6 }}>
-                {data.threshold_context.engine}{" "}
+              <div style={{ fontSize: 15, color: "#e2e8f0", fontWeight: 700, marginBottom: 6 }}>
+                <span title={getEngineTooltip(data.threshold_context.engine)} style={{ cursor: "help" }}>
+                  {data.threshold_context.engine}
+                </span>{" "}
                 {data.threshold_context.pass1 !== undefined && data.threshold_context.pass2 !== undefined
                   ? `${data.threshold_context.pass1} -> ${data.threshold_context.pass2}`
                   : "seuil enregistre"}
               </div>
-              <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6 }}>
+              <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>
                 Validation {data.threshold_context.gate_mode ?? "N/D"} · acceptee{" "}
                 {data.threshold_context.gate_accepted ? "oui" : "non"}
               </div>
             </>
           ) : (
-            <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6 }}>
+            <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>
               Aucun contexte de seuil n'a ete lie a cette explication.
             </div>
           )}
@@ -230,19 +240,21 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
             border: "1px solid rgba(148,163,184,0.12)",
           }}
         >
-          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 8 }}>MOTEURS ACTIFS</div>
+          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>MOTEURS ACTIFS</div>
           {activeEngines.length > 0 ? (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {activeEngines.map((engine) => (
                 <span
                   key={engine.engine}
+                  title={getEngineTooltip(engine.engine)}
                   style={{
                     padding: "5px 10px",
                     borderRadius: 999,
                     background: "rgba(125,211,252,0.08)",
                     border: "1px solid rgba(125,211,252,0.16)",
-                    fontSize: 11,
+                    fontSize: 13,
                     color: "#e2e8f0",
+                    cursor: "help",
                   }}
                 >
                   {engine.engine} · {engine.alarms}
@@ -250,7 +262,7 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
               ))}
             </div>
           ) : (
-            <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6 }}>
+            <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>
               Aucun moteur actif n'a ete lie a cette explication.
             </div>
           )}
@@ -258,7 +270,7 @@ export function ExplainabilityPanel({ data }: ExplainabilityPanelProps) {
       </div>
 
       {data.latest_decision && (
-        <div style={{ marginTop: 16, fontSize: 11, color: "#94a3b8", lineHeight: 1.7 }}>
+        <div style={{ marginTop: 16, fontSize: 13, color: "#94a3b8", lineHeight: 1.7 }}>
           Derniere decision du systeme : <span style={{ color: "#e2e8f0", fontWeight: 700 }}>{data.latest_decision.agent}</span>
           {" · "}
           {data.latest_decision.action}

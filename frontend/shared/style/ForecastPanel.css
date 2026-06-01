@@ -21,7 +21,7 @@
 }
 
 .forecast-title {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   letter-spacing: 0.22em;
   color: #7dd3fc;
@@ -29,7 +29,7 @@
 }
 
 .forecast-subtitle {
-  font-size: 12px;
+  font-size: 14px;
   color: #8aa0bd;
   margin-top: 8px;
   max-width: 760px;
@@ -47,7 +47,7 @@
 .forecast-mode-badge,
 .forecast-dataset-badge,
 .forecast-live-badge {
-  font-size: 10px;
+  font-size: 12px;
   padding: 5px 10px;
   border-radius: 999px;
   letter-spacing: 0.12em;
@@ -112,7 +112,7 @@
 
 .forecast-hero-kicker,
 .section-title {
-  font-size: 11px;
+  font-size: 13px;
   color: #6f87a5;
   text-transform: uppercase;
   letter-spacing: 0.18em;
@@ -120,7 +120,7 @@
 }
 
 .forecast-hero-status {
-  font-size: clamp(26px, 3vw, 38px);
+  font-size: clamp(28px, 3vw, 40px);
   font-weight: 800;
   line-height: 1;
   text-transform: uppercase;
@@ -129,7 +129,7 @@
 
 .forecast-hero-message {
   margin: 0;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.8;
   color: #d9e4ef;
   max-width: 62ch;
@@ -151,7 +151,7 @@
 
 .forecast-mini-label {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   color: #7890af;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -160,7 +160,7 @@
 
 .forecast-mini-card strong {
   color: #f8fafc;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .forecast-score-head,
@@ -173,7 +173,7 @@
 
 .forecast-score-trend,
 .forecast-score-history {
-  font-size: 12px;
+  font-size: 14px;
   color: #93c5fd;
 }
 
@@ -203,7 +203,7 @@
   border-radius: 999px;
   border: 1px solid rgba(248, 113, 113, 0.4);
   background: rgba(15, 23, 42, 0.68);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -214,12 +214,12 @@
   align-items: center;
   gap: 8px;
   color: #e2e8f0;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
 }
 
 .forecast-score-copy {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
   color: #9ab0c8;
 }
@@ -249,7 +249,7 @@
 .forecast-block h3 {
   margin: 0;
   color: #f8fafc;
-  font-size: 20px;
+  font-size: 22px;
 }
 
 .forecast-calm-card {
@@ -258,7 +258,7 @@
   border-radius: 16px;
   padding: 16px;
   color: #9fb4ca;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.7;
 }
 
@@ -289,14 +289,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   background: rgba(15, 23, 42, 0.76);
 }
 
 .forecast-concern-copy strong {
   color: #f8fafc;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .forecast-concern-topline {
@@ -307,7 +307,7 @@
 }
 
 .forecast-concern-delta {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -315,7 +315,7 @@
 .forecast-concern-copy p {
   margin: 8px 0 0;
   color: #a8bed4;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
 }
 
@@ -324,7 +324,7 @@
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 10px;
-  font-size: 10px;
+  font-size: 12px;
   color: #7189a6;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -337,13 +337,13 @@
 }
 
 .forecast-confidence-level {
-  font-size: 26px;
+  font-size: 28px;
   font-weight: 800;
   text-transform: uppercase;
 }
 
 .forecast-confidence-score {
-  font-size: 13px;
+  font-size: 15px;
   color: #93c5fd;
 }
 
@@ -353,7 +353,7 @@
 .forecast-scenario-operational p,
 .forecast-readonly-card p {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
   color: #aac0d6;
 }
@@ -362,7 +362,7 @@
   margin-top: 6px;
   margin-bottom: 8px;
   color: #f8fafc;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
 }
 
@@ -399,7 +399,7 @@
 .forecast-scenario-horizon {
   padding: 5px 9px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -418,7 +418,7 @@
 
 .forecast-scenario-operational-title {
   color: #f8fafc;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
 }
 
@@ -429,7 +429,7 @@
   padding-top: 8px;
   border-top: 1px solid rgba(71, 85, 105, 0.24);
   color: #7f95b0;
-  font-size: 11px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
@@ -458,14 +458,14 @@
 
 .forecast-chip-name {
   color: #7dd3fc;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.1em;
 }
 
 .forecast-chip-copy {
   color: #9cb3ca;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -480,13 +480,13 @@
   border: 1px solid rgba(71, 85, 105, 0.28);
   border-radius: 14px;
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
   color: #d2dfeb;
 }
 
 .forecast-footer {
-  font-size: 10px;
+  font-size: 12px;
   color: #60758f;
   text-align: center;
   margin-top: 16px;
@@ -497,7 +497,7 @@
 }
 
 .forecast-no-history {
-  font-size: 11px;
+  font-size: 13px;
   color: #64748b;
 }
 

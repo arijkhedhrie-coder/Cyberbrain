@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from typing import Any
@@ -31,6 +32,9 @@ _FUSION_MIN_SCORE = 70.0
 _FUSION_MIN_SEVERITY = 75.0
 _FUSION_WINDOW_MINUTES = 30
 _FUSION_MIN_ENGINES = 2
+
+# An IP is "recurrent" if its activity spans more than this many hours
+_RECURRENT_THRESHOLD_HOURS = 4
 
 
 def is_fusion_dataset(dataset: str | None) -> bool:
@@ -128,7 +132,7 @@ def _best_fusion_cluster(alarms: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for right, (right_ts, _) in enumerate(qualified):
         while right_ts - qualified[left][0] > window_limit:
             left += 1
-        current = qualified[left:right + 1]
+        current = qualified[left : right + 1]
         if len(current) > len(best_window):
             best_window = current
 
@@ -137,6 +141,41 @@ def _best_fusion_cluster(alarms: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _sort_alarm_key(alarm: dict[str, Any]) -> tuple[float, float]:
     return (_severity_score(alarm), _alarm_score(alarm))
+
+
+def _compute_ip_risk_score(
+    alarms_for_ip: list[dict[str, Any]],
+    datasets_hit: int,
+) -> float:
+    """
+    Composite 0–95 risk score for a single attacker IP.
+
+    Components (max totals):
+      • Severity    0–35 pts  — based on the worst alarm seen
+      • Cross-DS    0–30 pts  — 15 pts per additional dataset beyond the first
+      • Volume      0–20 pts  — logarithmic; 1 event ≈ 1 pt, 2 000 events ≈ 20 pts
+      • Diversity   0–10 pts  — unique attack types (2.5 pts each, cap 4 types)
+    """
+    n = len(alarms_for_ip)
+    if n == 0:
+        return 0.0
+
+    max_sev = max((_severity_score(a) for a in alarms_for_ip), default=0.0)
+
+    # Severity component (0–35)
+    sev_pts = max_sev * 0.35
+
+    # Cross-dataset spread (0–30): 1 ds → 0, 2 ds → 15, 3+ ds → 30
+    ds_pts = min(30.0, max(0.0, datasets_hit - 1) * 15.0)
+
+    # Volume – logarithmic scale capped at 2 000 events (0–20)
+    vol_pts = min(20.0, math.log10(n + 1) / math.log10(2000) * 22.0)
+
+    # Attack-type diversity (0–10)
+    unique_types = len({_alarm_type(a) for a in alarms_for_ip})
+    div_pts = min(10.0, unique_types * 2.5)
+
+    return round(min(95.0, max(0.0, sev_pts + ds_pts + vol_pts + div_pts)), 1)
 
 
 def _build_cross_dataset_alarm(entry: dict[str, Any]) -> dict[str, Any]:
@@ -167,7 +206,12 @@ def _build_cross_dataset_alarm(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_fusion_activity(title: str, detail: str, severity: str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+def _build_fusion_activity(
+    title: str,
+    detail: str,
+    severity: str,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "timestamp": datetime.now().isoformat(),
         "event_type": "FUSION_VIEW_ACTIVITY",
@@ -203,7 +247,9 @@ def _build_global_alert_ranking(alarms: list[dict[str, Any]]) -> list[dict[str, 
 
 
 def _build_minimization_series(dataset_results: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    buckets: dict[str, dict[str, float]] = defaultdict(lambda: {"alarmes": 0.0, "risque": 0.0, "count": 0.0})
+    buckets: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"alarmes": 0.0, "risque": 0.0, "count": 0.0}
+    )
     for payload in dataset_results.values():
         for point in payload.get("minimization", []):
             timestamp = str(point.get("timestamp") or "")
@@ -246,6 +292,7 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
     global_engine_counts: Counter[str] = Counter()
     ip_map: dict[str, dict[str, Any]] = {}
 
+    # ── 1. Collect data from every dataset ────────────────────────────────
     for dataset_id, payload in dataset_results.items():
         for alarm in payload.get("alarms", []) or payload.get("alarmes", []) or []:
             if not isinstance(alarm, dict):
@@ -258,10 +305,7 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
 
             ip = _alarm_ip(copied)
             if ip:
-                entry = ip_map.setdefault(ip, {
-                    "ip": ip,
-                    "alarms": [],
-                })
+                entry = ip_map.setdefault(ip, {"ip": ip, "alarms": []})
                 entry["alarms"].append(copied)
 
         for decision in payload.get("decisions", [])[-5:]:
@@ -277,25 +321,24 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
                 sessions.append(copied)
 
         log_lines.extend(payload.get("log_lines", [])[-10:])
-
         row_count += int(payload.get("kpis", {}).get("row_count", 0) or 0)
         deduped_count += int(payload.get("kpis", {}).get("deduped_count", 0) or 0)
 
-        noise_ratio = _as_float(payload.get("kpis", {}).get("noise_ratio"))
-        if noise_ratio is not None:
-            noise_values.append(noise_ratio)
+        for field, store in (
+            ("noise_ratio", noise_values),
+            ("health_score", health_values),
+        ):
+            val = _as_float(payload.get("kpis", {}).get(field))
+            if val is not None:
+                store.append(val)
 
-        health_score = _as_float(payload.get("kpis", {}).get("health_score"))
-        if health_score is not None:
-            health_values.append(health_score)
+        drift_val = _as_float(payload.get("trust", {}).get("drift_score"))
+        if drift_val is not None:
+            drift_scores.append(drift_val)
 
-        drift_score = _as_float(payload.get("trust", {}).get("drift_score"))
-        if drift_score is not None:
-            drift_scores.append(drift_score)
-
-        trust_score = _as_float(payload.get("trust", {}).get("confidence_in_metrics"))
-        if trust_score is not None:
-            trust_scores.append(trust_score)
+        trust_val = _as_float(payload.get("trust", {}).get("confidence_in_metrics"))
+        if trust_val is not None:
+            trust_scores.append(trust_val)
 
         data_sources.update(str(src) for src in payload.get("data_sources", []) if src)
 
@@ -303,6 +346,7 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
         prediction_score = max(prediction_score, int(prediction.get("prediction_score", 0) or 0))
         prediction_flags.update(str(flag) for flag in prediction.get("flags", []) if flag)
 
+    # ── 2. Cross-dataset IP correlation ───────────────────────────────────
     cross_dataset_ip_correlation: list[dict[str, Any]] = []
     for entry in ip_map.values():
         cluster = _best_fusion_cluster(entry["alarms"])
@@ -329,8 +373,6 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
         ]
         if not timestamps:
             continue
-        earliest_seen = min(timestamps).isoformat()
-        latest_seen = max(timestamps).isoformat()
         cross_dataset_ip_correlation.append({
             "ip": entry["ip"],
             "datasets": datasets_hit,
@@ -340,8 +382,8 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
             "total_alarm_count": len(cluster),
             "observed_alarm_count": len(entry["alarms"]),
             "max_score": round(max_score, 2),
-            "latest_seen": latest_seen,
-            "earliest_seen": earliest_seen,
+            "latest_seen": max(timestamps).isoformat(),
+            "earliest_seen": min(timestamps).isoformat(),
             "window_minutes": _FUSION_WINDOW_MINUTES,
             "criteria": {
                 "min_datasets": _FUSION_MIN_DATASETS,
@@ -362,6 +404,158 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
         reverse=True,
     )
 
+    # Sets used for fast lookup
+    correlated_ips: set[str] = {entry["ip"] for entry in cross_dataset_ip_correlation}
+
+    # How many correlated IPs are present in each dataset (for per-dataset score)
+    corr_ips_by_dataset: dict[str, int] = defaultdict(int)
+    for entry in cross_dataset_ip_correlation:
+        for ds in entry["datasets"]:
+            corr_ips_by_dataset[ds] += 1
+
+    # ── 3. Per-IP attacker records with composite risk scores ─────────────
+    #  (built BEFORE global risk so we can feed max_ip_risk into the formula)
+    attackers_detailed: list[dict[str, Any]] = []
+    for ip_address, ip_data in ip_map.items():
+        ip_alarms = ip_data["alarms"]
+        if not ip_alarms:
+            continue
+
+        datasets_for_ip = sorted(
+            {str(a.get("dataset_id") or "") for a in ip_alarms if a.get("dataset_id")}
+        )
+        n_ds = len(datasets_for_ip)
+
+        ts_list = [
+            ts
+            for a in ip_alarms
+            if (ts := _parse_alarm_timestamp(a.get("timestamp"))) is not None
+        ]
+        first_seen_str = min(ts_list).isoformat() if ts_list else datetime.now().isoformat()
+        last_seen_str = max(ts_list).isoformat() if ts_list else datetime.now().isoformat()
+
+        ip_risk = _compute_ip_risk_score(ip_alarms, n_ds)
+
+        # "ENGINE|TYPE" format, compatible with the frontend translateAttackType map
+        behaviors = sorted(
+            {f"{_alarm_engine(a)}|{_alarm_type(a)}" for a in ip_alarms}
+        )[:5]
+
+        # Per-dataset attack-type breakdown (human-readable strings)
+        ds_type_map: dict[str, list[str]] = {}
+        for alarm in ip_alarms:
+            ds = str(alarm.get("dataset_id") or "unknown")
+            ds_type_map.setdefault(ds, []).append(_alarm_type(alarm))
+
+        attack_summary = [
+            f"{ds}: {', '.join(sorted(set(types))[:2])}"
+            for ds, types in ds_type_map.items()
+        ]
+
+        is_recurrent = (
+            len(ts_list) >= 2
+            and (max(ts_list) - min(ts_list)).total_seconds() > _RECURRENT_THRESHOLD_HOURS * 3600
+        )
+
+        attackers_detailed.append({
+            "ip": ip_address,
+            "risk_score": ip_risk,
+            "event_count": len(ip_alarms),
+            "total_alarms": len(ip_alarms),
+            "dataset_count": n_ds,
+            "datasets": datasets_for_ip,
+            "behaviors": behaviors,
+            "first_seen": first_seen_str,
+            "last_seen": last_seen_str,
+            "is_recurrent": is_recurrent,
+            "is_correlated": ip_address in correlated_ips,
+            "max_severity": max((_severity_score(a) for a in ip_alarms), default=0),
+            "attack_types_by_dataset": attack_summary,
+        })
+
+    # Sort by composite risk score (highest first), keep top 10
+    attackers_detailed.sort(key=lambda x: x["risk_score"], reverse=True)
+    attackers_detailed = attackers_detailed[:10]
+
+    recurrent_attacker_count = sum(1 for att in attackers_detailed if att.get("is_recurrent", False))
+
+    total_alarm_count = len(alarms)
+
+    # ── 4. Global risk score – composite formula ──────────────────────────
+    #
+    # Four independent components (max 95 total, never reaches 100):
+    #
+    #   A) Cross-dataset correlation     0–40 pts  (most discriminating signal)
+    #   B) Attack volume (velocity)      0–25 pts  (log-scaled per dataset)
+    #   C) Dataset coverage              0–15 pts  (how many servers are hit)
+    #   D) Top-IP intensity              0–15 pts  (highest individual IP risk)
+    #
+    # Result interpretation: <40 calm, 40–69 elevated, ≥70 storm
+
+    # A) Correlation
+    n_corr = len(cross_dataset_ip_correlation)
+    if n_corr == 0:
+        corr_pts = 0.0
+    elif n_corr == 1:
+        corr_pts = 18.0
+    elif n_corr == 2:
+        corr_pts = 28.0
+    elif n_corr == 3:
+        corr_pts = 36.0
+    else:
+        corr_pts = min(40.0, 36.0 + (n_corr - 3) * 2.0)
+
+    # B) Volume
+    velocity = total_alarm_count / max(len(datasets), 1)
+    vol_pts = (
+        min(25.0, math.log10(velocity + 1) / math.log10(2000) * 28.0)
+        if velocity > 0
+        else 0.0
+    )
+
+    # C) Coverage
+    cov_pts = min(15.0, len(datasets) * 3.5)
+
+    # D) Intensity
+    max_ip_risk = max((att["risk_score"] for att in attackers_detailed), default=0.0)
+    intensity_pts = max_ip_risk * 0.16  # 95 pts max IP → 15.2 pts here
+
+    global_risk_score = round(
+        min(95.0, max(0.0, corr_pts + vol_pts + cov_pts + intensity_pts)), 1
+    )
+
+    # ── 5. Per-dataset risk scores ─────────────────────────────────────────
+    #
+    # Derived from the IP risk scores already computed above.
+    # For each dataset, take a weighted blend of the best and average IP risks
+    # present in that dataset — reflecting that one very dangerous IP matters
+    # more than many low-risk ones, but breadth still contributes.
+    risk_by_dataset: dict[str, float] = {}
+    for ds in datasets:
+        ds_alarms = [a for a in alarms if str(a.get("dataset_id") or "") == ds]
+        if not ds_alarms:
+            risk_by_dataset[ds] = 0.0
+            continue
+
+        ds_ips = {_alarm_ip(a) for a in ds_alarms if _alarm_ip(a)}
+        ds_ip_risks = [
+            att["risk_score"]
+            for att in attackers_detailed
+            if att["ip"] in ds_ips
+        ]
+
+        if ds_ip_risks:
+            top_risk = max(ds_ip_risks)
+            avg_risk = sum(ds_ip_risks) / len(ds_ip_risks)
+            raw = top_risk * 0.65 + avg_risk * 0.35
+        else:
+            # Fallback: severity average, heavily discounted (no attacker profile)
+            sev_avg = sum(_severity_score(a) for a in ds_alarms) / len(ds_alarms)
+            raw = sev_avg * 0.45
+
+        risk_by_dataset[ds] = round(min(90.0, max(0.0, raw)), 1)
+
+    # ── 6. Correlation alarms and alert ranking ────────────────────────────
     correlation_alarms = [
         _build_cross_dataset_alarm(entry)
         for entry in cross_dataset_ip_correlation[:10]
@@ -371,19 +565,25 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
     ranked_alarms = correlation_alarms + ranked_local_alarms[:50]
     global_alert_ranking = _build_global_alert_ranking(correlation_alarms + ranked_local_alarms)
 
-    total_alarm_count = len(alarms)
-    severity_average = (
-        sum(_severity_score(alarm) for alarm in alarms) / total_alarm_count
-        if total_alarm_count
-        else 0.0
+    # ── 7. Health / noise / drift aggregates ──────────────────────────────
+    if total_alarm_count == 0:
+        severity_average = 0.0
+    else:
+        severity_average = sum(_severity_score(alarm) for alarm in alarms) / total_alarm_count
+
+    average_health = (
+        round(sum(health_values) / len(health_values), 2)
+        if health_values
+        else round(max(0.0, 100.0 - global_risk_score), 2)
     )
-    global_risk_score = round(min(100.0, severity_average), 1)
-    average_health = round(sum(health_values) / len(health_values), 2) if health_values else round(max(0.0, 100.0 - global_risk_score), 2)
     average_noise = round(sum(noise_values) / len(noise_values), 3) if noise_values else None
     average_drift = round(sum(drift_scores) / len(drift_scores), 3) if drift_scores else None
     average_trust = round(sum(trust_scores) / len(trust_scores), 3) if trust_scores else None
-    health_status = "HEALTHY" if average_health >= 90 else ("WARNING" if average_health >= 70 else "CRITICAL")
+    health_status = (
+        "HEALTHY" if average_health >= 90 else ("WARNING" if average_health >= 70 else "CRITICAL")
+    )
 
+    # ── 8. Detector flags and events ──────────────────────────────────────
     global_detector_flags = [
         {
             "ip": entry["ip"],
@@ -404,19 +604,29 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
         )
     ]
     for flag in global_detector_flags[:5]:
-        events.append(_build_fusion_activity(
-            title="Cross-dataset detector flagged an IP",
-            detail=f"{flag['ip']} appears in {flag['dataset_count']} datasets: {', '.join(flag['datasets'])}",
-            severity=flag["severity"],
-            meta=flag,
-        ))
+        events.append(
+            _build_fusion_activity(
+                title="Cross-dataset detector flagged an IP",
+                detail=(
+                    f"{flag['ip']} appears in {flag['dataset_count']} datasets: "
+                    f"{', '.join(flag['datasets'])}"
+                ),
+                severity=flag["severity"],
+                meta=flag,
+            )
+        )
 
     if not cross_dataset_ip_correlation:
-        events.append(_build_fusion_activity(
-            title="No distributed IP overlap detected",
-            detail="The fusion layer found no high-confidence same-IP cluster across multiple datasets in the current run.",
-            severity="INFO",
-        ))
+        events.append(
+            _build_fusion_activity(
+                title="No distributed IP overlap detected",
+                detail=(
+                    "The fusion layer found no high-confidence same-IP cluster "
+                    "across multiple datasets in the current run."
+                ),
+                severity="INFO",
+            )
+        )
 
     minimization = _build_minimization_series(dataset_results)
 
@@ -425,7 +635,43 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
         "global_risk_score": global_risk_score,
         "average_drift_score": average_drift,
         "distributed_attack_ips": len(cross_dataset_ip_correlation),
+        "recurrent_attacker_count": recurrent_attacker_count,
         "ranked_alerts": len(global_alert_ranking),
+    }
+
+    # Shared notes block included in both metrics and kpis
+    shared_notes = {
+        "mode": "FUSION_VIEW",
+        "analysis_only": "true",
+        "global_risk_score": str(global_risk_score),
+        "average_drift_score": "" if average_drift is None else str(average_drift),
+        "distributed_attack_ips": str(len(cross_dataset_ip_correlation)),
+        "recurrent_attacker_count": str(recurrent_attacker_count),
+        "global_kpis": fusion_kpis,
+    }
+
+    shared_metrics = {
+        "available": True,
+        "missing_data": [],
+        "health_score": average_health,
+        "health_status": health_status,
+        "ssh_failures": None,
+        "blocked_ips": None,
+        "alert_status": "FUSION_VIEW",
+        "attack_pattern": "cross_dataset_overlay",
+        "ip_entropy": None,
+        "unique_attacking_ips": len(ip_map),
+        "attack_velocity": round(total_alarm_count / max(len(datasets), 1), 2),
+        "is_velocity_spike": len(cross_dataset_ip_correlation) > 0,
+        "night_ratio": None,
+        "row_count": row_count,
+        "server_count": len(datasets),
+        "data_sources": sorted(data_sources),
+        "deduped_count": deduped_count,
+        "noise_ratio": average_noise,
+        "data_quality": "FUSION_READ_ONLY",
+        "notes": shared_notes,
+        "nb_alarms": len(ranked_alarms),
     }
 
     return {
@@ -435,64 +681,8 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
         "dataset_id": FUSION_DATASET,
         "dataset_label": FUSION_LABEL,
         "datasets": datasets,
-        "metrics": {
-            "available": True,
-            "missing_data": [],
-            "health_score": average_health,
-            "health_status": health_status,
-            "ssh_failures": None,
-            "blocked_ips": None,
-            "alert_status": "FUSION_VIEW",
-            "attack_pattern": "cross_dataset_overlay",
-            "ip_entropy": None,
-            "unique_attacking_ips": len(ip_map),
-            "attack_velocity": round(total_alarm_count / max(len(datasets), 1), 2),
-            "is_velocity_spike": len(cross_dataset_ip_correlation) > 0,
-            "night_ratio": None,
-            "row_count": row_count,
-            "server_count": len(datasets),
-            "data_sources": sorted(data_sources),
-            "deduped_count": deduped_count,
-            "noise_ratio": average_noise,
-            "data_quality": "FUSION_READ_ONLY",
-            "notes": {
-                "mode": "FUSION_VIEW",
-                "analysis_only": "true",
-                "global_risk_score": str(global_risk_score),
-                "average_drift_score": "" if average_drift is None else str(average_drift),
-                "distributed_attack_ips": str(len(cross_dataset_ip_correlation)),
-            },
-            "nb_alarms": len(ranked_alarms),
-        },
-        "kpis": {
-            "available": True,
-            "missing_data": [],
-            "health_score": average_health,
-            "health_status": health_status,
-            "ssh_failures": None,
-            "blocked_ips": None,
-            "alert_status": "FUSION_VIEW",
-            "attack_pattern": "cross_dataset_overlay",
-            "ip_entropy": None,
-            "unique_attacking_ips": len(ip_map),
-            "attack_velocity": round(total_alarm_count / max(len(datasets), 1), 2),
-            "is_velocity_spike": len(cross_dataset_ip_correlation) > 0,
-            "night_ratio": None,
-            "row_count": row_count,
-            "server_count": len(datasets),
-            "data_sources": sorted(data_sources),
-            "deduped_count": deduped_count,
-            "noise_ratio": average_noise,
-            "data_quality": "FUSION_READ_ONLY",
-            "notes": {
-                "mode": "FUSION_VIEW",
-                "analysis_only": "true",
-                "global_risk_score": str(global_risk_score),
-                "average_drift_score": "" if average_drift is None else str(average_drift),
-                "distributed_attack_ips": str(len(cross_dataset_ip_correlation)),
-            },
-            "nb_alarms": len(ranked_alarms),
-        },
+        "metrics": shared_metrics,
+        "kpis": shared_metrics,
         "alarms": ranked_alarms,
         "alarmes": ranked_alarms,
         "trust": {
@@ -519,7 +709,9 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
             "risk_evolution": [],
             "behavioral_analysis": {},
             "prevention_suggestions": [],
-            "risk_level": "HIGH" if global_risk_score >= 70 else ("MEDIUM" if global_risk_score >= 40 else "LOW"),
+            "risk_level": (
+                "HIGH" if global_risk_score >= 70 else ("MEDIUM" if global_risk_score >= 40 else "LOW")
+            ),
             "signal_analysis": {},
             "explanations": [],
             "history": [],
@@ -538,18 +730,18 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
             for engine, count in sorted(global_engine_counts.items())
         ],
         "decisions": decisions[-20:],
-        "sessions": sorted(sessions, key=lambda item: str(item.get("date") or ""), reverse=True)[:20],
+        "sessions": sorted(
+            sessions, key=lambda item: str(item.get("date") or ""), reverse=True
+        )[:20],
         "log_lines": (
             [
-                f"[{datetime.now().strftime('%H:%M:%S')}] FUSION VIEW ready - read-only overlay across {len(datasets)} datasets",
+                f"[{datetime.now().strftime('%H:%M:%S')}] FUSION VIEW ready — "
+                f"read-only overlay across {len(datasets)} datasets"
             ]
             + log_lines[-40:]
         )[-60:],
         "events": events[-60:],
-        "memory": {
-            "analysis_only": True,
-            "datasets": datasets,
-        },
+        "memory": {"analysis_only": True, "datasets": datasets},
         "memory_file": None,
         "data_quality": {
             "raw_rows": row_count,
@@ -568,5 +760,7 @@ def build_fusion_payload(dataset_results: dict[str, dict[str, Any]]) -> dict[str
             "global_alert_ranking": global_alert_ranking,
             "global_detector_flags": global_detector_flags,
             "global_kpis": fusion_kpis,
+            "risk_breakdown": risk_by_dataset,
+            "attackers_detailed": attackers_detailed,
         },
     }

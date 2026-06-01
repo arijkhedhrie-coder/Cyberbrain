@@ -60,6 +60,57 @@ def get_memory_file(dataset_id: str | None = None) -> Path:
     return PROJECT_ROOT / f"memory_{dataset}.json"
 
 
+def _coerce_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _iso_timestamp(value: object) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    text = str(value or "").strip()
+    return text or datetime.now().isoformat()
+
+
+def _prediction_risk_label(score: int) -> str:
+    if score >= 70:
+        return "CRITICAL"
+    if score >= 40:
+        return "HIGH"
+    if score >= 20:
+        return "MEDIUM"
+    return "LOW"
+
+
 def _resolve_memory_file(
     memory_file: str | Path | None = None,
     dataset_id: str | None = None,
@@ -82,6 +133,11 @@ def _structure_vide() -> dict:
         "ips_suspectes":     [],
         "threshold_history": [],
         "backtest_history":  [],
+        "forecast_history":  [],
+        "prediction_state":  {},
+        "last_prediction_score": None,
+        "last_prediction_timestamp": None,
+        "last_prediction_change_timestamp": None,
         # ── apprentissage correcteur (CRITIQUES — ne jamais supprimer) ────────
         "good_actions":      [],   # APPROVE  : actions confirmées par l'admin
         "bad_actions":       [],   # REJECT   : faux positifs détectés
@@ -205,6 +261,69 @@ def sauvegarder_memoire(
         memoire["threshold_history"].append(entry)
         memoire["threshold_history"] = memoire["threshold_history"][-100:]
 
+    # ── 3b. Forecast history enrichi ──────────────────────────────────────────
+    forecast_entry = data.get("forecast_history_entry")
+    if isinstance(forecast_entry, dict) and forecast_entry:
+        memoire["forecast_history"].append(forecast_entry)
+        memoire["forecast_history"] = memoire["forecast_history"][-120:]
+
+    prediction_score = _coerce_int(data.get("prediction_score"))
+    if prediction_score is not None:
+        current_timestamp = _iso_timestamp(
+            data.get("prediction_timestamp")
+            or (forecast_entry or {}).get("timestamp")
+            or data.get("date")
+        )
+        previous_score = _coerce_int(memoire.get("last_prediction_score"))
+        previous_timestamp = memoire.get("last_prediction_timestamp")
+        previous_change_timestamp = memoire.get("last_prediction_change_timestamp") or previous_timestamp
+
+        if previous_score is None or previous_score != prediction_score:
+            change_timestamp = current_timestamp
+            variation = None if previous_score is None else prediction_score - previous_score
+        else:
+            change_timestamp = _iso_timestamp(previous_change_timestamp or current_timestamp)
+            variation = 0
+
+        parsed_change = _parse_timestamp(change_timestamp)
+        parsed_current = _parse_timestamp(current_timestamp)
+        stability_hours = None
+        if parsed_change and parsed_current:
+            stability_hours = round(max(0.0, (parsed_current - parsed_change).total_seconds() / 3600.0), 4)
+
+        predicted_outcomes = data.get("predicted_outcomes", [])
+        if not isinstance(predicted_outcomes, list):
+            predicted_outcomes = []
+
+        prediction_state = {
+            "available": True,
+            "last_prediction_score": prediction_score,
+            "last_prediction_timestamp": current_timestamp,
+            "last_prediction_change_timestamp": change_timestamp,
+            "stability_hours": stability_hours,
+            "variation": variation,
+            "prediction_score": prediction_score,
+            "prediction_timestamp": current_timestamp,
+            "prediction_confidence": _coerce_float(data.get("prediction_confidence")),
+            "prediction_risk_label": _prediction_risk_label(prediction_score),
+            "predicted_events": list(data.get("predicted_events", []) or []),
+            "predicted_outcomes": predicted_outcomes,
+            "prediction_flags": list(data.get("prediction_flags", []) or []),
+            "top_alarm": data.get("prediction_top_alarm") if isinstance(data.get("prediction_top_alarm"), dict) else None,
+            "top_alarm_ip": str(data.get("prediction_top_alarm_ip") or ""),
+            "top_alarm_message": str(data.get("prediction_top_alarm_message") or ""),
+            "top_alarm_risk": str(data.get("prediction_top_alarm_risk") or ""),
+            "top_alarm_total_failures": _coerce_int(data.get("prediction_top_alarm_total_failures")),
+            "model_agreement": _coerce_float(data.get("prediction_model_agreement")),
+            "model_agreement_label": str(data.get("prediction_model_agreement_label") or ""),
+            "current_thresholds": data.get("prediction_current_thresholds") if isinstance(data.get("prediction_current_thresholds"), dict) else {},
+        }
+
+        memoire["last_prediction_score"] = prediction_score
+        memoire["last_prediction_timestamp"] = current_timestamp
+        memoire["last_prediction_change_timestamp"] = change_timestamp
+        memoire["prediction_state"] = prediction_state
+
     # ── 4. Apprentissage correcteur (CRITIQUE) ────────────────────────────────
     for key in ("good_actions", "bad_actions", "modified_actions"):
         if key in data:
@@ -259,6 +378,7 @@ def get_contexte_historique(dataset_id: str | None = None) -> str:
                 f" | last_thresh: SSH≥{s.get('ssh_high')}"
                 f" WEB≥{s.get('web_high')}"
                 f" FTP≥{s.get('ftp_high')}"
+                f" Pass 2 ran: {last_th.get('pass2_ran')}"
                 f" pass2={last_th.get('pass2_ran')}"
                 f" alarms={last_th.get('nb_alarms_pass1', 0)}"
                 f"→{last_th.get('nb_alarms_final', 0)}"
@@ -269,7 +389,7 @@ def get_contexte_historique(dataset_id: str | None = None) -> str:
         f"sessions={len(memoire['sessions'])} "
         f"known_ips={memoire['ips_suspectes'][:3]} "
         f"last={derniere.get('date', '')[:16]} "
-        f"threshold_records={len(history)}"
+        f"Threshold records : {len(history)}"
         f"{thresh_line}"
     )
     return raw[:300]

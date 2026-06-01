@@ -34,7 +34,10 @@ class TestDynamicConfig(unittest.TestCase):
 
     def test_plain_text_fallback_extracts_signal(self):
         text = (
-            "Threat looks CRITICAL. Lower ssh threshold to 28 and rerun session. "
+            "Threat looks CRITICAL. Lower ssh threshold to 28, web threshold to 45, "
+            "ftp threshold to 40, kernel threshold to 35, session threshold to 42 "
+            "and session watchlist to 24. Rerun session. "
+            "Use window 45 minutes. "
             "Escalate 8.8.8.8 because it is near block."
         )
 
@@ -42,6 +45,12 @@ class TestDynamicConfig(unittest.TestCase):
 
         self.assertEqual(cfg.threat_level, "CRITICAL")
         self.assertEqual(cfg.ssh_high_risk_threshold, 28.0)
+        self.assertEqual(cfg.web_high_risk_threshold, 45.0)
+        self.assertEqual(cfg.ftp_high_risk_threshold, 40.0)
+        self.assertEqual(cfg.kernel_high_risk_threshold, 35.0)
+        self.assertEqual(cfg.session_high_risk_threshold, 42.0)
+        self.assertEqual(cfg.session_med_risk_threshold, 24.0)
+        self.assertEqual(cfg.correlation_window_min, 45.0)
         self.assertIn("8.8.8.8", cfg.escalate_ips)
         self.assertIn("session", cfg.rerun_engines)
         self.assertEqual(cfg.issued_by, "orchestrator_agent_plaintext")

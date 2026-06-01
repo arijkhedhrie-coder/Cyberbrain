@@ -789,10 +789,16 @@ def _build_explainability(events: list[dict[str, Any]], memory: dict[str, Any], 
         )
 
     if threshold_context and threshold_context.get("threshold") is not None:
+        engine_label = str(threshold_context.get("engine", "moteur")).upper()
+        pass_value = str(threshold_context.get("pass") or "1")
+        pass_label = {
+            "1": "premier contrôle",
+            "2": "deuxième contrôle",
+        }.get(pass_value, f"passage {pass_value}")
         add_evidence(
-            "Applied threshold",
+            f"Seuil retenu pour {engine_label}",
             f"{float(threshold_context['threshold']):.1f}",
-            f"{threshold_context.get('engine', 'ENGINE')} threshold used in the alarm snapshot for pass {threshold_context.get('pass')}.",
+            f"Ce seuil a servi au {pass_label} pour {engine_label.lower()}.",
             min(float(threshold_context["threshold"]) * 2.0, 100.0),
             "context",
             "alarm.threshold_snapshot",
@@ -801,9 +807,9 @@ def _build_explainability(events: list[dict[str, Any]], memory: dict[str, Any], 
         pass1_value = _as_float_or_none(threshold_context.get("pass1")) or 0.0
         pass2_value = _as_float_or_none(threshold_context.get("pass2")) or 0.0
         add_evidence(
-            "Threshold shift",
+            "Seuil ajusté",
             f"{pass1_value:.1f} -> {pass2_value:.1f}",
-            f"Latest persisted threshold context for {threshold_context.get('engine', 'ENGINE')}.",
+            f"Le système a gardé une ancienne valeur de seuil puis l'a ajustée pour {str(threshold_context.get('engine', 'moteur')).upper()}.",
             min(abs(pass2_value - pass1_value) * 4.0, 100.0),
             "context",
             "threshold_history",
@@ -878,6 +884,261 @@ def _build_explainability(events: list[dict[str, Any]], memory: dict[str, Any], 
         "latest_decision": latest_decision,
         "prediction_context": prediction_context,
         "threshold_context": threshold_context,
+    }
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        item = str(value or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
+def _build_forecast_context(explainability: dict[str, Any]) -> dict[str, Any]:
+    top_alarm = explainability.get("top_alarm") if isinstance(explainability.get("top_alarm"), dict) else {}
+    model_context = explainability.get("model_context") if isinstance(explainability.get("model_context"), dict) else {}
+    threshold_context = explainability.get("threshold_context") if isinstance(explainability.get("threshold_context"), dict) else {}
+    prediction_context = explainability.get("prediction_context") if isinstance(explainability.get("prediction_context"), dict) else {}
+
+    evidence_raw = explainability.get("evidence") if isinstance(explainability.get("evidence"), list) else []
+    evidence = [item for item in evidence_raw if isinstance(item, dict)]
+    engine_contributions_raw = explainability.get("engine_contributions") if isinstance(explainability.get("engine_contributions"), list) else []
+    engine_contributions = [item for item in engine_contributions_raw if isinstance(item, dict)]
+
+    dominant_engine = str(top_alarm.get("engine") or "").upper()
+    if not dominant_engine:
+        for engine in engine_contributions:
+            candidate = str(engine.get("engine") or "").upper()
+            if candidate:
+                dominant_engine = candidate
+                break
+
+    dominant_label = str(top_alarm.get("type") or "").replace("_", " ").strip().upper()
+    if not dominant_label and dominant_engine:
+        dominant_label = f"SIGNAL {dominant_engine}"
+
+    dominant_reason = str(top_alarm.get("human_insight") or top_alarm.get("message") or explainability.get("summary") or "").strip()
+    if not dominant_reason and evidence:
+        dominant_reason = str(evidence[0].get("detail") or evidence[0].get("value") or evidence[0].get("label") or "").strip()
+
+    fallback_events: list[str] = []
+    fallback_flags: list[str] = []
+    fallback_explanations: list[str] = []
+    fallback_suggestions: list[str] = []
+
+    # ─────────────────────────────────────────────────────────────────
+    # 1. Horizon estimation based on velocity and spike
+    # ─────────────────────────────────────────────────────────────────
+    attack_velocity = None
+    for ev in evidence:
+        if ev.get("source") == "metrics.attack_velocity":
+            try:
+                attack_velocity = float(ev.get("value", "0").split("/")[0])
+            except:
+                pass
+            break
+    is_spike = any(ev.get("source") == "metrics.is_velocity_spike" for ev in evidence)
+    if attack_velocity is not None:
+        if is_spike and attack_velocity > 100:
+            horizon = "Imminent (prochaines 10‑30 min)"
+        elif velocity > 50:
+            horizon = "Court terme (1‑2 heures)"
+        elif velocity > 20:
+            horizon = "Moyen terme (4‑6 heures)"
+        else:
+            horizon = "Long terme (12‑24 heures)"
+    else:
+        horizon = "Not estimated"
+
+    # ─────────────────────────────────────────────────────────────────
+    # 2. Build dynamic, actionable suggestions based on top alarm
+    # ─────────────────────────────────────────────────────────────────
+    suggestions = []
+    seen = set()  # to avoid duplicates
+    top_alarm = explainability.get("top_alarm")
+    ip = top_alarm.get("source_ip") or top_alarm.get("ip", "") if top_alarm else ""
+    score = top_alarm.get("score", 0) if top_alarm else 0
+    failures = top_alarm.get("failures", 0) if top_alarm else 0
+
+    if top_alarm:
+        engine = top_alarm.get("engine", "").upper()
+
+        if engine == "WEB":
+            if ip and score > 80:
+                s = f"🔥 Bloquer IP {ip} immédiatement dans le WAF (score {score})"
+                if s not in seen:
+                    suggestions.append(s); seen.add(s)
+            if ip and score > 50:
+                s = f"⚠️ Ajouter {ip} à la liste de surveillance – énumération web détectée"
+                if s not in seen:
+                    suggestions.append(s); seen.add(s)
+            s = f"⚡ Augmenter le seuil haute risque du moteur WEB à {max(55, int(score * 0.8))}"
+            if s not in seen:
+                suggestions.append(s); seen.add(s)
+
+        elif engine == "SSH":
+            if ip:
+                s = f"🚫 Bannir IP {ip} avec fail2ban : `fail2ban-client set sshd banip {ip}`"
+                if s not in seen:
+                    suggestions.append(s); seen.add(s)
+                if failures:
+                    s = f"🔄 Rotation des clés SSH pour comptes compromis ({failures} échecs)"
+                    if s not in seen:
+                        suggestions.append(s); seen.add(s)
+            s = f"📉 Réduire le seuil haute risque SSH à {max(22, int(score * 0.7))}"
+            if s not in seen:
+                suggestions.append(s); seen.add(s)
+
+        elif engine == "FTP":
+            if ip:
+                s = f"📁 Bloquer IP {ip} sur FTP : `iptables -A INPUT -s {ip} -j DROP`"
+                if s not in seen:
+                    suggestions.append(s); seen.add(s)
+            s = "🔒 Restreindre l'accès FTP à une liste autorisée (allowlist)"
+            if s not in seen:
+                suggestions.append(s); seen.add(s)
+            s = "📤 Examiner les transferts de fichiers récents (risque d'exfiltration)"
+            if s not in seen:
+                suggestions.append(s); seen.add(s)
+
+        elif engine in {"KERNEL", "SESSION"}:
+            s = "⚠️ Vérifier la stabilité du système : `dmesg | tail -50`"
+            if s not in seen:
+                suggestions.append(s); seen.add(s)
+            if failures:
+                s = f"💾 Augmenter la mémoire swap ou réduire la pression mémoire ({failures} erreurs noyau)"
+                if s not in seen:
+                    suggestions.append(s); seen.add(s)
+            s = "📊 Surveiller les événements OOM killer : `journalctl -k -g oom`"
+            if s not in seen:
+                suggestions.append(s); seen.add(s)
+
+        elif engine == "CORRELATION":
+            s = "🔗 Attaque multi‑vecteurs suspectée – corréler les logs SSH + WEB + FTP"
+            if s not in seen:
+                suggestions.append(s); seen.add(s)
+            s = "📉 Appliquer un rate limiting combiné sur tous les protocoles"
+            if s not in seen:
+                suggestions.append(s); seen.add(s)
+
+    # Fallback to engine contributions if top alarm missing
+    if not suggestions:
+        active_engines = [e.get("engine") for e in explainability.get("engine_contributions", []) if e.get("alarms", 0) > 0]
+        if "WEB" in active_engines:
+            suggestions = [
+                "🌐 Auditer les endpoints web pour détecter de l'énumération",
+                "⚙️ Envisager d'abaisser le seuil du moteur WEB"
+            ]
+        elif "SSH" in active_engines:
+            suggestions = [
+                "🔐 Forcer l'authentification par clé",
+                "📉 Réduire les seuils d'échec SSH"
+            ]
+        elif "FTP" in active_engines:
+            suggestions = [
+                "📁 Restreindre FTP aux IPs internes uniquement",
+                "🔍 Surveiller les taux de transfert"
+            ]
+        elif "KERNEL" in active_engines or "SESSION" in active_engines:
+            suggestions = [
+                "💾 Augmenter la mémoire système",
+                "📊 Lancer `top` pour identifier les processus gourmands"
+            ]
+
+    # Final fallback (still helpful, in French)
+    if not suggestions:
+        suggestions = [
+            "📊 Examiner les motifs d'alarmes récents",
+            "🔄 Lancer un backtest pour valider les seuils"
+        ]
+
+    # Deduplicate once more (in case of any remaining dupes)
+    fallback_suggestions = []
+    for s in suggestions:
+        if s not in fallback_suggestions:
+            fallback_suggestions.append(s)
+    fallback_suggestions = fallback_suggestions[:3]   # keep at most 3
+
+    # ─────────────────────────────────────────────────────────────────
+    # 3. Existing logic for flags, explanations, etc. (kept unchanged)
+    # ─────────────────────────────────────────────────────────────────
+    if dominant_engine:
+        fallback_events.append(f"{dominant_engine}_DOMINANT_SIGNAL")
+        fallback_flags.append(f"DOMINANT_{dominant_engine}")
+
+    if dominant_label and dominant_label != dominant_engine:
+        fallback_events.append(f"{dominant_label.replace(' ', '_')}_OBSERVED")
+
+    if threshold_context:
+        changed = bool(threshold_context.get("changed", False))
+        pass1_value = _as_float_or_none(threshold_context.get("pass1"))
+        pass2_value = _as_float_or_none(threshold_context.get("pass2"))
+        threshold_value = _as_float_or_none(threshold_context.get("threshold"))
+        if threshold_value is not None or (pass1_value is not None and pass2_value is not None and pass1_value != pass2_value):
+            changed = True
+        if changed:
+            fallback_events.append("THRESHOLD_SHIFT_RECORDED")
+            fallback_flags.append("THRESHOLD_SHIFT")
+            if pass1_value is not None and pass2_value is not None:
+                fallback_explanations.append(f"Seuil retenu: {pass1_value:.1f} -> {pass2_value:.1f}.")
+            elif threshold_value is not None:
+                fallback_explanations.append(f"Seuil retenu: {threshold_value:.1f}.")
+            fallback_suggestions.append("Observer l'effet de ce nouvel ajustement sur les prochaines exécutions.")
+
+    agreement = _as_float_or_none(model_context.get("agreement"))
+    if agreement is not None and agreement >= 0.75:
+        fallback_events.append("MODEL_AGREEMENT_STABLE")
+        fallback_flags.append("MODEL_AGREEMENT_HIGH")
+        fallback_suggestions.append("Les modeles convergent; conserver le suivi actuel.")
+
+    confidence_score = _as_float_or_none(model_context.get("trust_score"))
+    if confidence_score is not None and confidence_score >= 0.8:
+        fallback_flags.append("HIGH_TRUST")
+
+    if prediction_context.get("flags"):
+        fallback_explanations.append(
+            f"Prediction active: {', '.join(str(flag) for flag in prediction_context.get('flags', []) if flag)}."
+        )
+
+    for item in evidence[:4]:
+        text = str(item.get("detail") or item.get("value") or item.get("label") or "").strip()
+        if text:
+            fallback_explanations.append(text)
+
+    if dominant_reason:
+        fallback_explanations.insert(0, dominant_reason)
+
+    if not fallback_events and evidence:
+        fallback_events.append("PRIMARY_SIGNAL_DETECTED")
+    if not fallback_flags and dominant_engine:
+        fallback_flags.append(f"DOMINANT_{dominant_engine}")
+    if not fallback_flags:
+        fallback_flags.append("PRIMARY_SIGNAL")
+
+    return {
+        "available": bool(explainability.get("available", False)),
+        "generated_from": explainability.get("generated_from", "unknown"),
+        "summary": str(explainability.get("summary") or dominant_reason or "Evidence de prevision disponible."),
+        "dominant_engine": dominant_engine,
+        "dominant_label": dominant_label,
+        "dominant_reason": dominant_reason,
+        "model_context": model_context,
+        "top_alarm": top_alarm,
+        "evidence": evidence[:6],
+        "engine_contributions": engine_contributions[:5],
+        "threshold_context": threshold_context,
+        "prediction_context": prediction_context,
+        "fallback_events": _dedupe_strings(fallback_events)[:3],
+        "fallback_flags": _dedupe_strings(fallback_flags)[:4],
+        "fallback_explanations": _dedupe_strings(fallback_explanations)[:4],
+        "fallback_suggestions": fallback_suggestions,
+        "presentation_ready": bool(top_alarm or evidence or engine_contributions),
+        "horizon": horizon,  # NEW field for frontend
     }
 
 
@@ -970,11 +1231,17 @@ def api_servers(format: str = Query(default="list"), dataset: str | None = Query
 
 @router.get("/prediction")
 def api_prediction(dataset: str | None = Query(default=None)) -> dict[str, Any]:
+    events = _latest_jsonl(dataset)
+    memory = _load_memory(dataset)
+    explainability = _build_explainability(events, memory, dataset)
+    forecast_context = _build_forecast_context(explainability)
+
     payload = _get_dataset_payload(dataset)
     if payload and isinstance(payload.get("prediction"), dict):
-        return payload["prediction"]
+        response = dict(payload["prediction"])
+        response["forecast_context"] = forecast_context
+        return response
 
-    events = _latest_jsonl(dataset)
     prediction_event = _get_event(events, "PREDICTION_COMPUTED")
     if not prediction_event:
         return {
@@ -992,6 +1259,7 @@ def api_prediction(dataset: str | None = Query(default=None)) -> dict[str, Any]:
             "signal_analysis": {},
             "explanations": [],
             "history": [],
+            "forecast_context": forecast_context,
         }
     return {
         "available": True,
@@ -1011,6 +1279,7 @@ def api_prediction(dataset: str | None = Query(default=None)) -> dict[str, Any]:
         "signal_analysis": prediction_event.get("signal_analysis", {}),
         "explanations": prediction_event.get("explanations", []),
         "history": prediction_event.get("history", []),
+        "forecast_context": forecast_context,
     }
 
 

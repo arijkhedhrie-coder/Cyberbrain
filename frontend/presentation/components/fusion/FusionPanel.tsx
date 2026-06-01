@@ -1,4 +1,4 @@
-// @ts-nocheck
+﻿// @ts-nocheck
 import { createElement, useMemo, type ReactNode } from "react";
 import {
   Area,
@@ -8,237 +8,406 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  ReferenceLine,
 } from "recharts";
 import { useFusionViewModel } from "../../hooks/useFusionViewModel";
 
-type IconProps = {
-  size?: number;
-  color?: string;
-};
+// ─── Inline SVG icons (no external dep) ────────────────────────────────────
+type IconProps = { size?: number; color?: string };
 
-function BaseIcon({
-  size = 16,
-  color = "currentColor",
-  children,
-}: IconProps & { children: ReactNode }) {
+function Ico({ size = 16, color = "currentColor", d }: IconProps & { d: string }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke={color}
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {children}
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d={d} />
     </svg>
   );
 }
 
-function Activity({ size, color }: IconProps) {
-  return (
-    <BaseIcon size={size} color={color}>
-      <path d="M3 12h4l3-7 4 14 3-7h4" />
-    </BaseIcon>
-  );
-}
+const Icons = {
+  Alert:    (p: IconProps) => <Ico {...p} d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0ZM12 9v4M12 17h.01" />,
+  Shield:   (p: IconProps) => <Ico {...p} d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />,
+  Activity: (p: IconProps) => <Ico {...p} d="M3 12h4l3-7 4 14 3-7h4" />,
+  TrendUp:  (p: IconProps) => <Ico {...p} d="M22 7 13.5 15.5l-5-5L2 17M16 7h6v6" />,
+  Zap:      (p: IconProps) => <Ico {...p} d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z" />,
+  Network:  (p: IconProps) => <Ico {...p} d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18" />,
+  Eye:      (p: IconProps) => <Ico {...p} d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />,
+  Filter:   (p: IconProps) => <Ico {...p} d="M22 3H2l8 9.46V19l4 2V12.46L22 3Z" />,
+};
 
-function AlertTriangle({ size, color }: IconProps) {
-  return (
-    <BaseIcon size={size} color={color}>
-      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-      <path d="M12 9v4" />
-      <path d="M12 17h.01" />
-    </BaseIcon>
-  );
-}
-
-function Shield({ size, color }: IconProps) {
-  return (
-    <BaseIcon size={size} color={color}>
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
-    </BaseIcon>
-  );
-}
-
-function TrendingUp({ size, color }: IconProps) {
-  return (
-    <BaseIcon size={size} color={color}>
-      <path d="M22 7 13.5 15.5l-5-5L2 17" />
-      <path d="M16 7h6v6" />
-    </BaseIcon>
-  );
-}
-
-function Waves({ size, color }: IconProps) {
-  return (
-    <BaseIcon size={size} color={color}>
-      <path d="M2 6c2.5 0 2.5 2 5 2s2.5-2 5-2 2.5 2 5 2 2.5-2 5-2" />
-      <path d="M2 12c2.5 0 2.5 2 5 2s2.5-2 5-2 2.5 2 5 2 2.5-2 5-2" />
-      <path d="M2 18c2.5 0 2.5 2 5 2s2.5-2 5-2 2.5 2 5 2 2.5-2 5-2" />
-    </BaseIcon>
-  );
-}
-
-function Zap({ size, color }: IconProps) {
-  return (
-    <BaseIcon size={size} color={color}>
-      <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z" />
-    </BaseIcon>
-  );
-}
-
-function stripMotionProps<T extends Record<string, unknown>>(props: T) {
-  const {
-    initial,
-    animate,
-    transition,
-    whileHover,
-    ...rest
-  } = props;
-  void initial;
-  void animate;
-  void transition;
-  void whileHover;
+// ─── Strip framer-motion props (safe SSR / plain-React fallback) ─────────────
+function stripMotion<T extends Record<string, unknown>>(props: T) {
+  const { initial, animate, transition, whileHover, ...rest } = props;
+  void initial; void animate; void transition; void whileHover;
   return rest;
 }
-
-function createMotionTag(tag: string) {
-  return function MotionTag(props: Record<string, unknown>) {
-    return createElement(tag, stripMotionProps(props));
-  };
+function motionTag(tag: string) {
+  return (props: Record<string, unknown>) => createElement(tag, stripMotion(props));
 }
-
 const motion = {
-  circle: createMotionTag("circle"),
-  div: createMotionTag("div"),
-  h1: createMotionTag("h1"),
-  p: createMotionTag("p"),
-  section: createMotionTag("section"),
+  div:     motionTag("div"),
+  section: motionTag("section"),
+  h1:      motionTag("h1"),
+  p:       motionTag("p"),
 };
 
 const RechartsTooltip = Tooltip as any;
 
-// ---------- helpers ----------
-const getRiskState = (score: number) => {
-  if (score >= 70)
-    return {
-      label: "Tempête",
-      tone: "Activité hostile soutenue",
-      color: "#ff5d73",
-      soft: "rgba(255,93,115,0.18)",
-      ring: "rgba(255,93,115,0.45)",
-      icon: AlertTriangle,
-    };
-  if (score >= 40)
-    return {
-      label: "Agité",
-      tone: "Quelques signaux à surveiller",
-      color: "#f6c445",
-      soft: "rgba(246,196,69,0.16)",
-      ring: "rgba(246,196,69,0.4)",
-      icon: Activity,
-    };
+// ─── Risk level helpers ───────────────────────────────────────────────────────
+interface RiskLevel {
+  label: string;
+  sublabel: string;
+  color: string;
+  bg: string;
+  border: string;
+  icon: (p: IconProps) => JSX.Element;
+  band: string; // for the gauge arc
+}
+
+function getRiskLevel(score: number): RiskLevel {
+  if (score >= 70) return {
+    label: "Critique",
+    sublabel: "Activité coordonnée détectée",
+    color: "#f87171",
+    bg: "rgba(248,113,113,0.10)",
+    border: "rgba(248,113,113,0.35)",
+    icon: Icons.Alert,
+    band: "#f87171",
+  };
+  if (score >= 40) return {
+    label: "Élevé",
+    sublabel: "Signaux à surveiller",
+    color: "#fbbf24",
+    bg: "rgba(251,191,36,0.10)",
+    border: "rgba(251,191,36,0.35)",
+    icon: Icons.Activity,
+    band: "#fbbf24",
+  };
+  if (score >= 20) return {
+    label: "Modéré",
+    sublabel: "Activité faible",
+    color: "#60a5fa",
+    bg: "rgba(96,165,250,0.10)",
+    border: "rgba(96,165,250,0.35)",
+    icon: Icons.Eye,
+    band: "#60a5fa",
+  };
   return {
     label: "Calme",
-    tone: "Aucune menace marquée",
+    sublabel: "Aucune menace significative",
     color: "#4ade80",
-    soft: "rgba(74,222,128,0.16)",
-    ring: "rgba(74,222,128,0.4)",
-    icon: Shield,
+    bg: "rgba(74,222,128,0.10)",
+    border: "rgba(74,222,128,0.35)",
+    icon: Icons.Shield,
+    band: "#4ade80",
   };
-};
+}
 
-const timeLabel = (value: string) => {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-};
+// ─── Score bar (single IP or per-dataset) ────────────────────────────────────
+function ScoreBar({ value, max = 95, accent }: { value: number; max?: number; accent: string }) {
+  const pct = Math.max(0, Math.min(100, (value / max) * 100));
+  return (
+    <div style={{ height: 6, background: "rgba(148,163,184,0.12)", borderRadius: 99, overflow: "hidden" }}>
+      <div style={{
+        width: `${pct}%`, height: "100%", borderRadius: 99,
+        background: `linear-gradient(90deg, ${accent}99, ${accent})`,
+        transition: "width 0.8s ease",
+      }} />
+    </div>
+  );
+}
 
-const formatBehavior = (value?: string) => {
-  if (!value) return "Activité diverse";
-  const [, behavior] = value.split("|");
-  const txt = (behavior || value).replace(/_/g, " ");
-  return txt.charAt(0).toUpperCase() + txt.slice(1);
-};
-
-// ---------- circular gauge ----------
-function RiskGauge({ score, color }: { score: number; color: string }) {
+// ─── Circular gauge ───────────────────────────────────────────────────────────
+function RiskGauge({ score }: { score: number }) {
+  const level = getRiskLevel(score);
   const clamped = Math.max(0, Math.min(100, score));
-  const radius = 92;
-  const circ = 2 * Math.PI * radius;
-  const offset = circ - (clamped / 100) * circ;
+  const r = 70;
+  const circ = 2 * Math.PI * r;
+  // Arc covers 270° (from 135° to 45°) — standard gauge shape
+  const arcLen = circ * 0.75;
+  const offset = arcLen - (clamped / 100) * arcLen;
 
   return (
-    <div style={{ position: "relative", width: 220, height: 220 }}>
-      <svg width="220" height="220" style={{ transform: "rotate(-90deg)" }}>
-        <defs>
-          <linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor={color} />
-            <stop offset="100%" stopColor="#7dd3fc" />
-          </linearGradient>
-        </defs>
-        <circle
-          cx="110"
-          cy="110"
-          r={radius}
-          fill="none"
-          stroke="rgba(148,163,184,0.12)"
-          strokeWidth="14"
-        />
-        <motion.circle
-          cx="110"
-          cy="110"
-          r={radius}
-          fill="none"
-          stroke="url(#gaugeGrad)"
-          strokeWidth="14"
-          strokeLinecap="round"
-          strokeDasharray={circ}
-          initial={{ strokeDashoffset: circ }}
-          animate={{ strokeDashoffset: offset }}
-          transition={{ duration: 1.4, ease: "easeOut" }}
-          style={{ filter: `drop-shadow(0 0 12px ${color})` }}
-        />
-      </svg>
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4, duration: 0.6 }}
-          style={{
-            fontSize: 64,
-            fontWeight: 900,
-            color,
-            lineHeight: 1,
-            fontFamily: "'JetBrains Mono', monospace",
-            textShadow: `0 0 24px ${color}55`,
-          }}
-        >
-          {Math.round(clamped)}
-        </motion.div>
-        <div style={{ color: "#64748b", fontSize: 11, marginTop: 6, letterSpacing: "0.18em" }}>
-          SUR 100
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+      <div style={{ position: "relative", width: 170, height: 170 }}>
+        <svg width="170" height="170" viewBox="0 0 170 170">
+          <defs>
+            <linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor={level.band} stopOpacity="0.6" />
+              <stop offset="100%" stopColor={level.band} />
+            </linearGradient>
+          </defs>
+          {/* Track */}
+          <circle cx="85" cy="85" r={r} fill="none" stroke="rgba(148,163,184,0.10)"
+            strokeWidth="11" strokeDasharray={`${arcLen} ${circ}`}
+            strokeDashoffset={0} strokeLinecap="round"
+            transform="rotate(135 85 85)" />
+          {/* Value arc */}
+          <circle cx="85" cy="85" r={r} fill="none" stroke="url(#gaugeGrad)"
+            strokeWidth="11"
+            strokeDasharray={`${arcLen} ${circ}`}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+            transform="rotate(135 85 85)"
+            style={{ filter: `drop-shadow(0 0 6px ${level.band}88)` }}
+          />
+        </svg>
+        <div style={{
+          position: "absolute", inset: 0,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 2,
+        }}>
+          <div style={{
+            fontSize: 48, fontWeight: 900, color: level.color, lineHeight: 1,
+            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+            textShadow: `0 0 20px ${level.color}44`,
+          }}>
+            {Math.round(clamped)}
+          </div>
+          <div style={{ color: "#ffffff", fontSize: 10, letterSpacing: "0.15em", fontWeight: 700 }}>/ 100</div>
         </div>
+      </div>
+      {/* Label pill */}
+      <div style={{
+        display: "inline-flex", alignItems: "center", gap: 6,
+        padding: "5px 14px", borderRadius: 99,
+        background: level.bg, border: `1px solid ${level.border}`,
+        color: level.color, fontSize: 12, fontWeight: 700, letterSpacing: "0.05em",
+      }}>
+        <level.icon size={12} color={level.color} />
+        {level.label}
       </div>
     </div>
   );
 }
 
-// ---------- main ----------
+// ─── Dataset contribution bar list ───────────────────────────────────────────
+function DatasetRiskBars({ breakdown }: { breakdown: Record<string, number> }) {
+  const entries = Object.entries(breakdown)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (!entries.length) return null;
+
+  const fmt = (name: string) =>
+    name
+      .replace(/^__/, "").replace(/__$/, "")
+      .replace(/[_-]+/g, " ").trim()
+      .replace(/^\w/, (c) => c.toUpperCase()) || name;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {entries.map(([name, score]) => {
+        const level = getRiskLevel(score);
+        return (
+          <div key={name}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+              <span style={{ color: "#94a3b8", fontSize: 12, fontWeight: 500 }}>{fmt(name)}</span>
+              <span style={{
+                color: level.color, fontSize: 12, fontWeight: 700,
+                fontFamily: "'JetBrains Mono', monospace",
+                background: level.bg, padding: "1px 8px", borderRadius: 99,
+                border: `1px solid ${level.border}`,
+              }}>
+                {Math.round(score)}/100
+              </span>
+            </div>
+            <ScoreBar value={score} accent={level.color} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Attack type translation ──────────────────────────────────────────────────
+const ATTACK_LABELS: Record<string, string> = {
+  "CORRELATION|CROSS_PROTOCOL_ATTACK":       "Attaque multi-protocoles",
+  "CORRELATION|CROSS_DATASET_IP_CORRELATION":"IP présente sur plusieurs serveurs",
+  "SSH|BRUTE_FORCE_SSH":                     "Force brute SSH",
+  "SSH|BRUTE_FORCE":                         "Force brute SSH",
+  "SSH|CORRECTIVE_EXECUTED":                 "Contre-mesure SSH appliquée",
+  "SSH|CORRECTIVE_SUGGESTION":               "Suggestion corrective SSH",
+  "SSH|SSH_BRUTE_FORCE":                     "Force brute SSH",
+  "SSH|SSH_SUCCESS":                         "Connexion SSH réussie (suspecte)",
+  "SSH|SSH_FAILED":                          "Échec de connexion SSH",
+  "SESSION|POST_BREACH_LOGIN":               "Connexion post-intrusion",
+  "SESSION|BEHAVIORAL_ANOMALY":              "Comportement anormal de session",
+  "WEB|WEB_ATTACK":                          "Attaque web",
+  "WEB|WEB_ENUMERATION":                     "Énumération web",
+  "WEB|PORT_SCAN":                           "Scan de ports",
+  "FTP|DATA_THEFT":                          "Vol de données FTP",
+  "FTP|FTP_BRUTE_FORCE":                     "Force brute FTP",
+  "FTP|FTP_DATA_EXFIL":                      "Exfiltration FTP",
+  "KERNEL|CRASH_COMING":                     "Instabilité système imminente",
+  "KERNEL|KERNEL_PANIC":                     "Panique noyau",
+};
+
+function translateBehavior(raw: string): string {
+  const parts = raw.split("|");
+  const key = parts.length >= 2 ? `${parts[0]}|${parts[1]}` : raw;
+  if (ATTACK_LABELS[key]) return ATTACK_LABELS[key];
+  return raw.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// ─── Attacker row card ────────────────────────────────────────────────────────
+function AttackerCard({ att, rank }: { att: any; rank: number }) {
+  const level = getRiskLevel(att.risk_score);
+  const fmtDs = (name: string) =>
+    name.replace(/^__/, "").replace(/__$/, "").replace(/[_-]+/g, " ").trim()
+      .replace(/^\w/, (c) => c.toUpperCase()) || name;
+
+  const medals = ["🥇", "🥈", "🥉"];
+  const rankLabel = rank <= 3 ? medals[rank - 1] : `#${rank}`;
+
+  const tags = [];
+  if (att.is_correlated) tags.push({ label: "Multi-serveurs", color: "#f87171" });
+  if (att.is_recurrent) tags.push({ label: "Récurrent", color: "#fbbf24" });
+
+  return (
+    <div style={{
+      borderRadius: 14, padding: "16px 18px",
+      background: "linear-gradient(180deg, rgba(15,23,42,0.8), rgba(8,17,31,0.9))",
+      border: `1px solid ${rank === 1 ? level.border : "rgba(51,65,85,0.5)"}`,
+      display: "grid", gridTemplateColumns: "36px 1fr auto", gap: 14, alignItems: "start",
+    }}>
+      {/* rank */}
+      <div style={{ fontSize: rank <= 3 ? 22 : 13, paddingTop: 2,
+        color: "#475569", fontWeight: 800, fontFamily: "monospace", textAlign: "center" }}>
+        {rankLabel}
+      </div>
+
+      {/* details */}
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+          <span style={{
+            color: "#e2e8f0", fontSize: 14, fontWeight: 700,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>{att.ip}</span>
+          {tags.map((t) => (
+            <span key={t.label} style={{
+              fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 99,
+              background: `${t.color}18`, border: `1px solid ${t.color}44`, color: t.color,
+            }}>{t.label}</span>
+          ))}
+        </div>
+
+        <div style={{ color: "#64748b", fontSize: 12, marginBottom: 8 }}>
+          {att.event_count.toLocaleString("fr-FR")} événements
+          {att.dataset_count > 1 && ` · ${att.dataset_count} serveurs`}
+        </div>
+
+        {/* Datasets */}
+        {att.datasets?.length > 0 && (
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 5 }}>
+            <span style={{ color: "#38bdf8" }}>Serveurs : </span>
+            {att.datasets.map(fmtDs).join(", ")}
+          </div>
+        )}
+
+        {/* Behaviors */}
+        {att.behaviors?.slice(0, 2).map((b: string) => (
+          <div key={b} style={{
+            display: "inline-block", fontSize: 11, padding: "2px 8px", borderRadius: 99,
+            background: "rgba(148,163,184,0.08)", border: "1px solid rgba(148,163,184,0.15)",
+            color: "#94a3b8", marginRight: 6, marginTop: 4,
+          }}>
+            {translateBehavior(b)}
+          </div>
+        ))}
+
+        {/* Score bar */}
+        <div style={{ marginTop: 10 }}>
+          <ScoreBar value={att.risk_score} accent={level.color} />
+        </div>
+      </div>
+
+      {/* Score badge */}
+      <div style={{
+        display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, paddingTop: 2,
+      }}>
+        <div style={{
+          fontSize: 28, fontWeight: 900, color: level.color, lineHeight: 1,
+          fontFamily: "'JetBrains Mono', monospace",
+          textShadow: `0 0 12px ${level.color}44`,
+        }}>
+          {Math.round(att.risk_score)}
+        </div>
+        <div style={{ fontSize: 10, color: "#ffffff" }}>/ 100</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Timeline tooltip ─────────────────────────────────────────────────────────
+const timeLabel = (value: string) => {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? value
+    : d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+};
+
+// ─── Stat tile ────────────────────────────────────────────────────────────────
+function StatTile({ icon: Icon, label, value, hint, accent = "#7dd3fc" }: {
+  icon: (p: IconProps) => JSX.Element;
+  label: string; value: string | number; hint?: string; accent?: string;
+}) {
+  return (
+    <div style={{
+      padding: "16px 18px", borderRadius: 14,
+      background: "linear-gradient(180deg, rgba(15,23,42,0.7), rgba(11,18,36,0.7))",
+      border: "1px solid rgba(51,65,85,0.5)",
+      display: "flex", alignItems: "flex-start", gap: 14,
+    }}>
+      <div style={{
+        width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+        display: "grid", placeItems: "center",
+        background: `${accent}18`, border: `1px solid ${accent}30`,
+      }}>
+        <Icon size={17} color={accent} />
+      </div>
+      <div>
+            <div style={{ color: "#38bdf8", fontSize: 12, letterSpacing: "0.12em", fontWeight: 700 }}>
+          {label.toUpperCase()}
+        </div>
+        <div style={{
+          color: "#e2e8f0", fontSize: 22, fontWeight: 800, lineHeight: 1.1, marginTop: 3,
+          fontFamily: "'JetBrains Mono', monospace",
+        }}>
+          {value}
+        </div>
+        {hint && <div style={{ color: "#e2e8f0", fontSize: 11, marginTop: 3 }}>{hint}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Section wrapper ──────────────────────────────────────────────────────────
+function Section({ children, style = {} }: { children: ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div style={{
+      borderRadius: 20, padding: "24px 26px",
+      background: "linear-gradient(180deg, #0b1224 0%, #0f172a 100%)",
+      border: "1px solid rgba(125,211,252,0.10)",
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function SectionTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ color: "#7dd3fc", fontSize: 10, letterSpacing: "0.18em", fontWeight: 800, marginBottom: 5 }}>
+        {eyebrow}
+      </div>
+      <div style={{ color: "#f1f5f9", fontSize: 20, fontWeight: 700 }}>{title}</div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
 interface Props {
   dataset?: string;
   isFusionView?: boolean;
@@ -246,467 +415,313 @@ interface Props {
 
 export function FusionPanel({ dataset = "", isFusionView = true }: Props) {
   const { summary, attackers, timeline, riskPoints, loading, error } = useFusionViewModel(dataset);
-  const hasRealFusionData =
-    summary.available || timeline.length > 0 || attackers.length > 0 || riskPoints.length > 0;
-  const riskState = getRiskState(summary.current_risk_score);
-  const RiskIcon = riskState.icon;
-  const latestCluster = timeline[timeline.length - 1] ?? null;
-  const peakCluster = useMemo(
-    () =>
-      timeline.reduce(
-        (best, e) => (!best || e.risk_score > best.risk_score ? e : best),
-        null as (typeof timeline)[number] | null,
-      ),
-    [timeline],
-  );
-  const totalRisk = attackers.reduce((s, a) => s + a.risk_score, 0) || 1;
-  const top3 = attackers.slice(0, 3);
-  const rest = attackers.slice(3, 6);
-  const displayHeadline = latestCluster
-    ? `${formatBehavior(latestCluster.dominant_behaviors[0]?.behavior)} en cours`
-    : hasRealFusionData
-      ? "Aucune activite notable"
-      : "Flux fusion indisponible";
 
-  if (!loading && !hasRealFusionData) {
+  const hasData =
+    summary.available || timeline.length > 0 || attackers.length > 0 || riskPoints.length > 0;
+
+  // ── Score ──────────────────────────────────────────────────────────────────
+  const rawScore = summary.current_risk_score;
+  const currentScore =
+    typeof rawScore === "number" && Number.isFinite(rawScore)
+      ? Math.max(0, Math.min(100, rawScore))
+      : null;
+  const level = currentScore !== null ? getRiskLevel(currentScore) : getRiskLevel(0);
+
+  // ── Attacker pool ──────────────────────────────────────────────────────────
+  const topPool: any[] = attackers.length > 0 ? attackers : summary.top_attackers ?? [];
+
+  // ── Risk breakdown ─────────────────────────────────────────────────────────
+  const riskBreakdown: Record<string, number> = useMemo(() => {
+    if (summary.fusion?.risk_breakdown) return summary.fusion.risk_breakdown;
+    const map: Record<string, number> = {};
+    for (const att of topPool) {
+      for (const ds of att.datasets || []) {
+        map[ds] = Math.max(map[ds] || 0, att.risk_score ?? 0);
+      }
+    }
+    return map;
+  }, [summary, topPool]);
+
+  // ── Timeline peak ──────────────────────────────────────────────────────────
+  const peakPoint = useMemo(
+    () => riskPoints.reduce(
+      (best, e) => (!best || (e.risk_score ?? 0) > (best.risk_score ?? 0) ? e : best),
+      null as (typeof riskPoints)[number] | null,
+    ),
+    [riskPoints],
+  );
+
+  // ── Activity trend ─────────────────────────────────────────────────────────
+  const trend = useMemo(() => {
+    if (riskPoints.length < 4) return "stable";
+    const half = Math.floor(riskPoints.length / 2);
+    const first = riskPoints.slice(0, half).reduce((s, p) => s + (p.risk_score ?? 0), 0) / half;
+    const last  = riskPoints.slice(-half).reduce((s, p) => s + (p.risk_score ?? 0), 0) / half;
+    const delta = last - first;
+    if (delta > 5)  return "monte";
+    if (delta < -5) return "descend";
+    return "stable";
+  }, [riskPoints]);
+
+  const trendLabel: Record<string, string> = {
+    monte: "↑ En hausse",
+    descend: "↓ En baisse",
+    stable: "→ Stable",
+  };
+
+  // ── Correlated IPs ─────────────────────────────────────────────────────────
+  const correlatedCount = summary.correlated_attacker_count ?? 0;
+  const recurrentCount  = summary.recurrent_attacker_count  ?? 0;
+
+  // ─────────────────── EMPTY STATE ───────────────────────────────────────────
+  if (!loading && !hasData) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-        <section
-          style={{
-            borderRadius: 28,
-            padding: "32px 36px",
-            border: "1px solid rgba(148,163,184,0.2)",
-            background: "linear-gradient(135deg, #0a1224 0%, #0f172a 100%)",
-          }}
-        >
-          <div style={{ color: "#7dd3fc", fontSize: 11, fontWeight: 800, letterSpacing: "0.18em", marginBottom: 14 }}>
-            FUSION DATASET SCOPE
-          </div>
-          <div style={{ color: "#f1f5f9", fontSize: 28, fontWeight: 800, lineHeight: 1.15 }}>
-            Donnees fusion indisponibles.
-          </div>
-          <div style={{ color: "#94a3b8", fontSize: 15, lineHeight: 1.6, marginTop: 12, maxWidth: 720 }}>
-            Aucun recoupement exploitable n'a ete retourne pour les datasets selectionnes.
-            {isFusionView
-              ? " Verifiez que plusieurs datasets avec evenements rejouables sont bien disponibles."
-              : " Cette vue reste basee sur les datasets selectionnes dans le scope courant."}
-          </div>
-          {error && (
-            <div style={{ color: "#64748b", fontSize: 12, marginTop: 16 }}>
-              {error}
-            </div>
-          )}
-        </section>
-      </div>
+      <Section style={{ background: "linear-gradient(135deg, #0a1224 0%, #0f172a 100%)" }}>
+        <div style={{ color: "#7dd3fc", fontSize: 10, fontWeight: 800, letterSpacing: "0.18em", marginBottom: 12 }}>
+          VUE CONSOLIDÉE
+        </div>
+        <div style={{ color: "#f1f5f9", fontSize: 26, fontWeight: 800, marginBottom: 10 }}>
+          Données indisponibles
+        </div>
+        <div style={{ color: "#64748b", fontSize: 14, lineHeight: 1.6, maxWidth: 600 }}>
+          Aucun recoupement exploitable n'a été retourné pour les datasets sélectionnés.
+          {isFusionView
+            ? " Vérifiez que plusieurs datasets avec événements rejouables sont disponibles."
+            : " Cette vue reste basée sur les datasets sélectionnés dans le scope courant."}
+        </div>
+        {error && <div style={{ color: "#475569", fontSize: 12, marginTop: 12 }}>{error}</div>}
+      </Section>
     );
   }
 
-  // Plain-language headline
-  const headline = latestCluster
-    ? `${formatBehavior(latestCluster.dominant_behaviors[0]?.behavior)} en cours`
-    : "Aucune activité notable";
-
+  // ─────────────────── MAIN RENDER ───────────────────────────────────────────
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* ====================== HERO ====================== */}
-      <motion.section
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        style={{
-          position: "relative",
-          overflow: "hidden",
-          borderRadius: 28,
-          padding: "32px 36px",
-          border: `1px solid ${riskState.ring}`,
-          background: `radial-gradient(circle at 85% 20%, ${riskState.soft}, transparent 55%), linear-gradient(135deg, #0a1224 0%, #0f172a 100%)`,
-          boxShadow: `0 30px 80px -20px ${riskState.soft}, inset 0 1px 0 rgba(255,255,255,0.04)`,
-        }}
-      >
-        {/* animated aurora */}
-        <motion.div
-          aria-hidden
-          animate={{ opacity: [0.35, 0.6, 0.35] }}
-          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-          style={{
-            position: "absolute",
-            top: -120,
-            right: -120,
-            width: 420,
-            height: 420,
-            background: `radial-gradient(circle, ${riskState.color}33, transparent 60%)`,
-            filter: "blur(40px)",
-            pointerEvents: "none",
-          }}
-        />
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr auto",
-            gap: 32,
-            alignItems: "center",
-            position: "relative",
-          }}
-        >
+      {/* ══════════════════ HERO ══════════════════ */}
+      <div style={{
+        borderRadius: 22, padding: "28px 30px",
+        background: `radial-gradient(ellipse at 90% 0%, ${level.bg.replace("0.10", "0.15")}, transparent 55%),
+                     linear-gradient(160deg, #0a1224 0%, #0f172a 100%)`,
+        border: `1px solid ${level.border}`,
+        boxShadow: `0 24px 60px -20px ${level.bg}`,
+      }}>
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr auto",
+          gap: 32,
+          alignItems: "center",
+        }}>
+          {/* Left: text */}
           <div>
-            <motion.div
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.2 }}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "6px 14px",
-                borderRadius: 999,
-                background: riskState.soft,
-                border: `1px solid ${riskState.ring}`,
-                color: riskState.color,
-                fontSize: 11,
-                fontWeight: 800,
-                letterSpacing: "0.18em",
-                marginBottom: 18,
-              }}
-            >
-              <RiskIcon size={13} />
-              ÉTAT DU RÉSEAU · {riskState.label.toUpperCase()}
-            </motion.div>
+            {/* Pill badge */}
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: 7,
+              padding: "5px 13px", borderRadius: 99, marginBottom: 16,
+              background: level.bg, border: `1px solid ${level.border}`,
+              color: level.color, fontSize: 11, fontWeight: 800, letterSpacing: "0.1em",
+            }}>
+              <level.icon size={12} color={level.color} />
+              VUE CONSOLIDÉE · {level.label.toUpperCase()}
+            </div>
 
-            <motion.h1
-              title={headline}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3, duration: 0.5 }}
-              style={{
-                margin: 0,
-                fontSize: 38,
-                lineHeight: 1.15,
-                fontWeight: 800,
-                color: "#f1f5f9",
-                letterSpacing: "-0.02em",
-              }}
-            >
-              {displayHeadline}
-              <span style={{ color: riskState.color }}>.</span>
-            </motion.h1>
+            <h1 style={{
+              margin: "0 0 10px", fontSize: 32, fontWeight: 800, color: "#f1f5f9",
+              letterSpacing: "-0.02em", lineHeight: 1.15,
+            }}>
+              Analyse globale des serveurs
+              <span style={{ color: level.color }}>.</span>
+            </h1>
 
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.5, duration: 0.5 }}
-              style={{
-                margin: "12px 0 0",
-                color: "#94a3b8",
-                fontSize: 16,
-                maxWidth: 520,
-                lineHeight: 1.55,
-              }}
-            >
-              {riskState.tone}. {summary.attacker_count} sources observées,{" "}
-              {summary.correlated_attacker_count} agissent en réseau.
-            </motion.p>
+            <p style={{ margin: "0 0 24px", color: "#64748b", fontSize: 15, lineHeight: 1.6 }}>
+              {level.sublabel}
+              {summary.attacker_count > 0 && (
+                <> · <strong style={{ color: "#94a3b8" }}>{summary.attacker_count}</strong> sources détectées</>
+              )}
+              {correlatedCount > 0 && (
+                <>, <strong style={{ color: level.color }}>{correlatedCount}</strong> agissent en réseau</>
+              )}
+            </p>
 
-            <div style={{ display: "flex", gap: 28, marginTop: 28 }}>
+            {/* 3 key stats */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
               {[
-                { label: "Sources", value: summary.attacker_count, icon: Activity },
-                { label: "Pic du jour", value: Math.round(summary.peak_risk_score), icon: TrendingUp },
-                { label: "Vagues", value: summary.cluster_count, icon: Waves },
-              ].map((m, i) => (
-                <motion.div
-                  key={m.label}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.6 + i * 0.08 }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#64748b", fontSize: 11, letterSpacing: "0.14em" }}>
-                    <m.icon size={12} />
-                    {m.label.toUpperCase()}
+                {
+                  label: "Score de risque",
+                  value: currentScore === null ? "N/A" : `${Math.round(currentScore)}/100`,
+                  sub: level.sublabel,
+                  icon: Icons.Alert,
+                  accent: level.color,
+                },
+                {
+                  label: "Sources actives",
+                  value: summary.attacker_count ?? "—",
+                  sub: correlatedCount > 0
+                    ? `${correlatedCount} en réseau · ${recurrentCount} récurrentes`
+                    : "Aucune corrélation détectée",
+                  icon: Icons.Network,
+                  accent: correlatedCount > 0 ? "#f87171" : "#7dd3fc",
+                },
+                {
+                  label: "Tendance",
+                  value: trendLabel[trend],
+                  sub: peakPoint
+                    ? `Pic à ${timeLabel(peakPoint.timestamp)} — score ${Math.round(peakPoint.risk_score ?? 0)}`
+                    : "Historique insuffisant",
+                  icon: Icons.TrendUp,
+                  accent: trend === "monte" ? "#f87171" : trend === "descend" ? "#4ade80" : "#fbbf24",
+                },
+              ].map((card) => (
+                <div key={card.label} style={{
+                  borderRadius: 14, padding: "16px 18px",
+                  background: "rgba(8,17,31,0.9)",
+                  border: `1px solid ${card.accent}30`,
+                  boxShadow: `inset 0 1px 0 rgba(255,255,255,0.03)`,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+                    <card.icon size={12} color={card.accent} />
+                    <span style={{ color: "#38bdf8", fontSize: 12, fontWeight: 700, letterSpacing: "0.12em" }}>
+                      {card.label.toUpperCase()}
+                    </span>
                   </div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: "#e2e8f0", marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>
-                    {m.value}
+                  <div style={{
+                    color: "#f1f5f9", fontSize: card.label === "Tendance" ? 16 : 26,
+                    fontWeight: 800, lineHeight: 1.1, fontFamily: "'JetBrains Mono', monospace",
+                    letterSpacing: "-0.02em",
+                  }}>
+                    {card.value}
                   </div>
-                </motion.div>
+                  <div style={{ color: "#e2e8f0", fontSize: 11, marginTop: 6, lineHeight: 1.4 }}>
+                    {card.sub}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
 
-          <RiskGauge score={summary.current_risk_score} color={riskState.color} />
-        </div>
-      </motion.section>
-
-      {/* ====================== TIMELINE STORY ====================== */}
-      <motion.section
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.1 }}
-        style={{
-          borderRadius: 24,
-          padding: 28,
-          background: "linear-gradient(180deg, #0b1224 0%, #0f172a 100%)",
-          border: "1px solid rgba(125,211,252,0.12)",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
-          <div>
-            <div style={{ color: "#7dd3fc", fontSize: 11, letterSpacing: "0.18em", fontWeight: 800, marginBottom: 6 }}>
-              DERNIÈRES HEURES
-            </div>
-            <div style={{ color: "#f1f5f9", fontSize: 22, fontWeight: 700 }}>
-              L'activité {summary.current_risk_score > summary.average_risk_score ? "monte" : "redescend"}
-            </div>
-          </div>
-          {peakCluster && (
-            <div style={{ textAlign: "right" }}>
-              <div style={{ color: "#64748b", fontSize: 11, letterSpacing: "0.14em" }}>PIC À</div>
-              <div style={{ color: "#e2e8f0", fontSize: 18, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>
-                {timeLabel(peakCluster.window_end)}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <ResponsiveContainer width="100%" height={240}>
-          <AreaChart data={riskPoints} margin={{ top: 10, right: 8, left: -20, bottom: 0 }}>
-            <defs>
-              <linearGradient id="riskArea" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={riskState.color} stopOpacity={0.5} />
-                <stop offset="100%" stopColor={riskState.color} stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="2 6" stroke="rgba(148,163,184,0.08)" vertical={false} />
-            <XAxis dataKey="timestamp" tickFormatter={timeLabel} tick={{ fill: "#475569", fontSize: 10 }} axisLine={false} tickLine={false} />
-            <YAxis domain={[0, 100]} tick={{ fill: "#475569", fontSize: 10 }} axisLine={false} tickLine={false} />
-            <RechartsTooltip
-              contentStyle={{
-                background: "rgba(8,17,31,0.95)",
-                border: "1px solid rgba(125,211,252,0.25)",
-                borderRadius: 12,
-                color: "#dbeafe",
-              }}
-              labelFormatter={(l: any) => timeLabel(String(l))}
-              formatter={(v: number, k) => [k === "risk_score" ? `${Math.round(v)}/100` : v, k === "risk_score" ? "Niveau" : "Évén."]}
-            />
-            <Area
-              type="monotone"
-              dataKey="risk_score"
-              stroke={riskState.color}
-              strokeWidth={3}
-              fill="url(#riskArea)"
-              animationDuration={1500}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </motion.section>
-
-      {/* ====================== TOP SOURCES — PODIUM ====================== */}
-      <motion.section
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.2 }}
-        style={{
-          borderRadius: 24,
-          padding: 28,
-          background: "linear-gradient(180deg, #0b1224 0%, #0f172a 100%)",
-          border: "1px solid rgba(125,211,252,0.12)",
-        }}
-      >
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ color: "#7dd3fc", fontSize: 11, letterSpacing: "0.18em", fontWeight: 800, marginBottom: 6 }}>
-            QUI EST DERRIÈRE
-          </div>
-          <div style={{ color: "#f1f5f9", fontSize: 22, fontWeight: 700 }}>
-            Les sources les plus actives
+          {/* Right: gauge */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <RiskGauge score={currentScore ?? 0} />
           </div>
         </div>
+      </div>
 
-        {/* podium */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: rest.length ? 18 : 0 }}>
-          {top3.map((a, i) => {
-            const state = getRiskState(a.risk_score);
-            const share = Math.round((a.risk_score / totalRisk) * 100);
-            const medals = ["🥇", "🥈", "🥉"];
-            return (
-              <motion.div
-                key={a.ip}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 + i * 0.1, duration: 0.5 }}
-                whileHover={{ y: -4, transition: { duration: 0.2 } }}
-                style={{
-                  position: "relative",
-                  padding: "20px 18px",
-                  borderRadius: 18,
-                  background: `radial-gradient(circle at 50% 0%, ${state.soft}, transparent 70%), rgba(15,23,42,0.7)`,
-                  border: `1px solid ${state.ring}`,
-                  boxShadow: i === 0 ? `0 12px 40px -12px ${state.soft}` : undefined,
-                  overflow: "hidden",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                  <div style={{ fontSize: 28 }}>{medals[i]}</div>
-                  <div
-                    style={{
-                      color: state.color,
-                      fontSize: 24,
-                      fontWeight: 900,
-                      fontFamily: "'JetBrains Mono', monospace",
-                      textShadow: `0 0 12px ${state.color}55`,
-                    }}
-                  >
-                    {Math.round(a.risk_score)}
-                  </div>
-                </div>
-                <div style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4 }}>
-                  {a.ip}
-                </div>
-                <div style={{ color: "#64748b", fontSize: 11, marginBottom: 12 }}>
-                  {a.event_count} actions · {a.dataset_count} sources
-                </div>
-                <div style={{ height: 6, borderRadius: 999, background: "rgba(148,163,184,0.1)", overflow: "hidden" }}>
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${Math.max(8, share)}%` }}
-                    transition={{ delay: 0.5 + i * 0.1, duration: 0.8, ease: "easeOut" }}
-                    style={{ height: "100%", background: `linear-gradient(90deg, ${state.color}, #7dd3fc)` }}
-                  />
-                </div>
-                <div style={{ color: "#94a3b8", fontSize: 10, marginTop: 6 }}>
-                  {share}% du risque global
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-
-        {/* rest as compact rows */}
-        {rest.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {rest.map((a, i) => {
-              const state = getRiskState(a.risk_score);
-              return (
-                <motion.div
-                  key={a.ip}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.6 + i * 0.05 }}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "40px 1fr auto",
-                    alignItems: "center",
-                    gap: 14,
-                    padding: "12px 16px",
-                    borderRadius: 14,
-                    background: "rgba(15,23,42,0.5)",
-                    border: "1px solid rgba(51,65,85,0.5)",
-                  }}
-                >
-                  <div style={{ color: "#475569", fontWeight: 800, fontFamily: "'JetBrains Mono', monospace" }}>
-                    #{i + 4}
-                  </div>
-                  <div>
-                    <div style={{ color: "#cbd5e1", fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>{a.ip}</div>
-                    <div style={{ color: "#64748b", fontSize: 11 }}>{a.event_count} actions</div>
-                  </div>
-                  <div
-                    style={{
-                      color: state.color,
-                      background: state.soft,
-                      border: `1px solid ${state.ring}`,
-                      padding: "4px 10px",
-                      borderRadius: 999,
-                      fontSize: 12,
-                      fontWeight: 800,
-                      fontFamily: "'JetBrains Mono', monospace",
-                    }}
-                  >
-                    {Math.round(a.risk_score)}
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        )}
-      </motion.section>
-
-      {/* ====================== FOOTER — what was filtered ====================== */}
-      <motion.section
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.4 }}
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 14,
-        }}
-      >
-        {[
-          {
-            icon: Zap,
-            label: "Évén. analysés",
-            value: summary.source_events.replayed_event_count.toLocaleString("fr-FR"),
-            hint: "tout ce qui est passé par le moteur",
-          },
-          {
-            icon: Shield,
-            label: "Incidents retenus",
-            value: summary.source_events.deduped_alert_event_count.toLocaleString("fr-FR"),
-            hint: "doublons écartés",
-          },
-          {
-            icon: Activity,
-            label: "Bruit filtré",
-            value: summary.source_events.deduped_duplicate_alerts.toLocaleString("fr-FR"),
-            hint: "ignoré comme répétitif",
-          },
-        ].map((m, i) => (
-          <motion.div
-            key={m.label}
-            whileHover={{ y: -2 }}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 + i * 0.08 }}
-            style={{
-              padding: "18px 20px",
-              borderRadius: 16,
-              background: "linear-gradient(180deg, rgba(15,23,42,0.7), rgba(11,18,36,0.7))",
-              border: "1px solid rgba(51,65,85,0.6)",
-              display: "flex",
-              alignItems: "center",
-              gap: 14,
-            }}
-          >
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 12,
-                display: "grid",
-                placeItems: "center",
-                background: "rgba(125,211,252,0.1)",
-                color: "#7dd3fc",
-              }}
-            >
-              <m.icon size={20} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ color: "#64748b", fontSize: 10, letterSpacing: "0.14em" }}>
-                {m.label.toUpperCase()}
-              </div>
-              <div style={{ color: "#e2e8f0", fontSize: 22, fontWeight: 800, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.1, marginTop: 2 }}>
-                {m.value}
-              </div>
-              <div style={{ color: "#475569", fontSize: 10, marginTop: 2 }}>{m.hint}</div>
-            </div>
-          </motion.div>
-        ))}
-      </motion.section>
-
-      {error && (
-        <div style={{ color: "#94a3b8", fontSize: 12, textAlign: "right" }}>Source partielle : {error}</div>
+      {/* ══════════════════ RISQUE PAR SERVEUR ══════════════════ */}
+      {Object.keys(riskBreakdown).length > 0 && (
+        <Section>
+          <SectionTitle eyebrow="RÉPARTITION" title="Risque par serveur" />
+          <DatasetRiskBars breakdown={riskBreakdown} />
+        </Section>
       )}
-      {loading && (
-        <div style={{ color: "#64748b", fontSize: 12, textAlign: "right" }}>Chargement…</div>
+
+      {/* ══════════════════ CHRONOLOGIE ══════════════════ */}
+      {riskPoints.length > 0 && (
+        <Section>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
+            <SectionTitle eyebrow="CHRONOLOGIE" title="Évolution du niveau de risque" />
+            {peakPoint && (
+              <div style={{ textAlign: "right", paddingBottom: 4 }}>
+                <div style={{ color: "#cbd5e1", fontSize: 10, letterSpacing: "0.12em" }}>PIC DÉTECTÉ</div>
+                <div style={{ color: "#e2e8f0", fontSize: 16, fontWeight: 700, fontFamily: "monospace" }}>
+                  {timeLabel(peakPoint.timestamp)}
+                <span style={{ color: "#cbd5e1", fontSize: 12, marginLeft: 6 }}>
+                    score {Math.round(peakPoint.risk_score ?? 0)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={riskPoints} margin={{ top: 8, right: 6, left: -22, bottom: 0 }}>
+              <defs>
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={level.band} stopOpacity={0.4} />
+                  <stop offset="100%" stopColor={level.band} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="2 6" stroke="rgba(148,163,184,0.07)" vertical={false} />
+              <ReferenceLine y={70} stroke="rgba(248,113,113,0.3)" strokeDasharray="4 4" />
+              <ReferenceLine y={40} stroke="rgba(251,191,36,0.25)" strokeDasharray="4 4" />
+              <XAxis dataKey="timestamp" tickFormatter={timeLabel}
+                tick={{ fill: "#cbd5e1", fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis domain={[0, 100]} tick={{ fill: "#cbd5e1", fontSize: 10 }}
+                axisLine={false} tickLine={false} />
+              <RechartsTooltip
+                contentStyle={{
+                  background: "rgba(8,17,31,0.95)",
+                  border: "1px solid rgba(125,211,252,0.2)",
+                  borderRadius: 10, color: "#e2e8f0",
+                }}
+                labelFormatter={(l: any) => timeLabel(String(l))}
+                formatter={(v: number, k: string) => [
+                  k === "risk_score" ? `${Math.round(v)} / 100` : v,
+                  k === "risk_score" ? "Score" : "Événements",
+                ]}
+              />
+              <Area type="monotone" dataKey="risk_score" stroke={level.band} strokeWidth={2.5}
+                fill="url(#areaGrad)" dot={false} activeDot={{ r: 4, fill: level.band }} />
+            </AreaChart>
+          </ResponsiveContainer>
+
+          {/* Legend */}
+          <div style={{ display: "flex", gap: 18, marginTop: 12 }}>
+            {[
+              { color: "rgba(248,113,113,0.5)", label: "Critique" },
+              { color: "rgba(251,191,36,0.5)",  label: "Élevé" },
+            ].map((item) => (
+              <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ width: 24, height: 2, background: item.color, borderRadius: 1 }} />
+                <span style={{ color: "#cbd5e1", fontSize: 10 }}>{item.label}</span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* ══════════════════ SOURCES D'ATTAQUE ══════════════════ */}
+      {topPool.length > 0 && (
+        <Section>
+          <SectionTitle eyebrow="SOURCES" title="Attaquants détectés" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {topPool.slice(0, 8).map((att, i) => (
+              <AttackerCard key={att.ip} att={att} rank={i + 1} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* ══════════════════ STATS OPÉRATIONNELLES ══════════════════ */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+        <StatTile
+          icon={Icons.Zap}
+          label="Événements analysés"
+          value={(summary.source_events?.replayed_event_count ?? 0).toLocaleString("fr-FR")}
+          hint="Passés par le moteur de détection"
+          accent="#addef5"
+        />
+        <StatTile
+          icon={Icons.Filter}
+          label="Incidents retenus"
+          value={(summary.source_events?.deduped_alert_event_count ?? 0).toLocaleString("fr-FR")}
+          hint="Après déduplication"
+          accent="#4ade80"
+        />
+        <StatTile
+          icon={Icons.Activity}
+          label="Bruit filtré"
+          value={(summary.source_events?.deduped_duplicate_alerts ?? 0).toLocaleString("fr-FR")}
+          hint="Alertes répétitives écartées"
+          accent="#94a3b8"
+        />
+      </div>
+
+      {/* Status bar */}
+      {(error || loading) && (
+        <div style={{ color: "#475569", fontSize: 11, textAlign: "right" }}>
+          {loading && "Chargement en cours…"}
+          {error && !loading && `Source partielle : ${error}`}
+        </div>
       )}
     </div>
   );

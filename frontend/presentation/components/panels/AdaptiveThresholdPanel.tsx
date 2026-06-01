@@ -73,7 +73,9 @@ const summarizeEngineChanges = (entry: ThresholdHistoryEntry | null) => {
     .map((engine) => {
       const snapshot = entry.engines[engine];
       if (!snapshot) return engine;
-      return `${engine} ${snapshot.pass1} -> ${snapshot.pass2}`;
+      const pass1 = snapshot.pass1 ?? "N/A";
+      const pass2 = snapshot.pass2 ?? "N/A";
+      return `${engine}: ${pass1} -> ${pass2}`;
     })
     .join("  |  ");
 };
@@ -90,19 +92,33 @@ export function AdaptiveThresholdPanel({ thresholdHistory, engines }: AdaptiveTh
   const gateVisual = getGateVisual(latestEntry);
   const changedSessions = thresholdHistory.filter((entry) => entry.changed_engines.length > 0).length;
   const appliedSessions = thresholdHistory.filter((entry) => entry.gate.accepted).length;
-  const sshEngine = engines.find((engine) => engine.engine === "SSH");
-  const latestSsh = latestEntry?.engines.SSH ?? null;
+  const primaryEngine = engines[0] ?? null;
+  const latestChangeSummary = summarizeEngineChanges(latestEntry);
 
   const chartData = thresholdHistory.map((entry) => {
-    const ssh = entry.engines.SSH ?? { pass1: null, pass2: null, changed: false };
+    const engineName = entry.changed_engines[0] ?? "SSH";
+    const snapshot = entry.engines[engineName] ?? entry.engines.SSH ?? { pass1: null, pass2: null, changed: false };
+    const changeSummary = entry.changed_engines.length > 0
+      ? entry.changed_engines
+          .map((engine) => {
+            const s = entry.engines[engine];
+            if (!s) return engine;
+            const pass1 = s.pass1 ?? "N/A";
+            const pass2 = s.pass2 ?? "N/A";
+            return `${engine}: ${pass1} -> ${pass2}`;
+          })
+          .join("  |  ")
+      : "Aucun seuil moteur n'a change.";
 
     return {
+      engine: engineName,
       time: formatAxisTime(entry.timestamp),
       fullTime: formatDateTime(entry.timestamp),
-      pass1Threshold: ssh.pass1 ?? 0,
-      pass2Threshold: ssh.pass2 ?? ssh.pass1 ?? 0,
+      pass1Threshold: snapshot.pass1 ?? 0,
+      pass2Threshold: snapshot.pass2 ?? snapshot.pass1 ?? 0,
       pass1Alarms: entry.nb_alarms_pass1,
       finalAlarms: entry.nb_alarms_final,
+      changeSummary,
     };
   });
 
@@ -123,8 +139,8 @@ export function AdaptiveThresholdPanel({ thresholdHistory, engines }: AdaptiveTh
       <div className="chart-header" style={{ alignItems: "flex-start", marginBottom: 16 }}>
         <div style={{ display: "grid", gap: 6 }}>
           <span className="chart-title">Ajustement automatique des seuils</span>
-          <span style={{ fontSize: 12, color: "#8ba5c0", lineHeight: 1.45 }}>
-            Compare l'evolution des seuils SSH avec la baisse des alertes apres la decision du systeme.
+          <span style={{ fontSize: 14, color: "#8ba5c0", lineHeight: 1.45 }}>
+            Compare l'evolution des seuils des moteurs avec la baisse des alertes apres la decision du systeme.
           </span>
         </div>
 
@@ -132,7 +148,7 @@ export function AdaptiveThresholdPanel({ thresholdHistory, engines }: AdaptiveTh
           style={{
             padding: "6px 10px",
             borderRadius: 999,
-            fontSize: 10,
+            fontSize: 12,
             fontWeight: 700,
             letterSpacing: "0.08em",
             whiteSpace: "nowrap",
@@ -148,9 +164,9 @@ export function AdaptiveThresholdPanel({ thresholdHistory, engines }: AdaptiveTh
       {chartData.length === 0 ? (
         <div className="chart-empty" style={{ display: "grid", gap: 8 }}>
           <span>Aucun historique d'ajustement n'a encore ete enregistre.</span>
-          {sshEngine && (
-            <span style={{ fontSize: 11, color: "#7c8fa1" }}>
-              Seuils SSH actuels : P1 {sshEngine.pass1} | P2 {sshEngine.pass2}
+          {primaryEngine && (
+            <span style={{ fontSize: 13, color: "#7c8fa1" }}>
+              Seuils actuels : {primaryEngine.engine} P1 {primaryEngine.pass1} | P2 {primaryEngine.pass2}
             </span>
           )}
         </div>
@@ -166,9 +182,9 @@ export function AdaptiveThresholdPanel({ thresholdHistory, engines }: AdaptiveTh
           >
             {[
               {
-                label: "Dernier SSH",
-                value: latestSsh ? `${latestSsh.pass1} -> ${latestSsh.pass2}` : "N/A",
-                tone: latestSsh?.changed ? "#fbbf24" : "#e2e8f0",
+                label: "Dernier ajustement",
+                value: latestEntry ? latestChangeSummary : "N/A",
+                tone: latestEntry?.changed_engines.length ? "#fbbf24" : "#e2e8f0",
               },
               {
                 label: "Passages ajustes",
@@ -187,8 +203,8 @@ export function AdaptiveThresholdPanel({ thresholdHistory, engines }: AdaptiveTh
               },
             ].map((item) => (
               <div key={item.label} style={infoCardStyle}>
-                <div style={{ fontSize: 11, color: "#7c8fa1", marginBottom: 8 }}>{item.label}</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: item.tone }}>{item.value}</div>
+                <div style={{ fontSize: 13, color: "#7c8fa1", marginBottom: 8 }}>{item.label}</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: item.tone }}>{item.value}</div>
               </div>
             ))}
           </div>
@@ -198,21 +214,21 @@ export function AdaptiveThresholdPanel({ thresholdHistory, engines }: AdaptiveTh
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.08)" />
               <XAxis
                 dataKey="time"
-                tick={{ fill: "#64748b", fontSize: 10 }}
+                tick={{ fill: "#64748b", fontSize: 12 }}
                 tickLine={false}
                 axisLine={{ stroke: "rgba(148,163,184,0.12)" }}
                 interval="preserveStartEnd"
               />
               <YAxis
                 yAxisId="threshold"
-                tick={{ fill: "#64748b", fontSize: 10 }}
+                tick={{ fill: "#64748b", fontSize: 12 }}
                 tickLine={false}
                 axisLine={{ stroke: "rgba(148,163,184,0.12)" }}
               />
               <YAxis
                 yAxisId="alarms"
                 orientation="right"
-                tick={{ fill: "#64748b", fontSize: 10 }}
+                tick={{ fill: "#64748b", fontSize: 12 }}
                 tickLine={false}
                 axisLine={{ stroke: "rgba(148,163,184,0.12)" }}
               />
@@ -242,7 +258,7 @@ export function AdaptiveThresholdPanel({ thresholdHistory, engines }: AdaptiveTh
                 yAxisId="threshold"
                 type="monotone"
                 dataKey="pass1Threshold"
-                name="SSH P1"
+                name="Seuil P1"
                 stroke="#94a3b8"
                 strokeWidth={2}
                 dot={false}
@@ -251,7 +267,7 @@ export function AdaptiveThresholdPanel({ thresholdHistory, engines }: AdaptiveTh
                 yAxisId="threshold"
                 type="monotone"
                 dataKey="pass2Threshold"
-                name="SSH P2"
+                name="Seuil P2"
                 stroke="#fbbf24"
                 strokeWidth={2.2}
                 dot={{ r: 3, fill: "#fbbf24" }}
@@ -268,8 +284,8 @@ export function AdaptiveThresholdPanel({ thresholdHistory, engines }: AdaptiveTh
             }}
           >
             <div style={infoCardStyle}>
-              <div style={{ fontSize: 11, color: "#7c8fa1", marginBottom: 8 }}>Dernier passage</div>
-              <div style={{ fontSize: 12, color: "#e2e8f0", lineHeight: 1.6 }}>
+              <div style={{ fontSize: 13, color: "#7c8fa1", marginBottom: 8 }}>Dernier passage</div>
+              <div style={{ fontSize: 14, color: "#e2e8f0", lineHeight: 1.6 }}>
                 {latestEntry
                   ? `Alertes ${latestEntry.nb_alarms_pass1} -> ${latestEntry.nb_alarms_final} | Confiance ${latestTrust} | Menace ${latestEntry.threat_level}`
                   : "Aucun passage enregistre pour le moment."}
@@ -277,8 +293,8 @@ export function AdaptiveThresholdPanel({ thresholdHistory, engines }: AdaptiveTh
             </div>
 
             <div style={infoCardStyle}>
-              <div style={{ fontSize: 11, color: "#7c8fa1", marginBottom: 8 }}>Moteurs ajustes</div>
-              <div style={{ fontSize: 12, color: "#cbd5e1", lineHeight: 1.6 }}>{summarizeEngineChanges(latestEntry)}</div>
+              <div style={{ fontSize: 13, color: "#7c8fa1", marginBottom: 8 }}>Moteurs ajustes</div>
+              <div style={{ fontSize: 14, color: "#cbd5e1", lineHeight: 1.6 }}>{summarizeEngineChanges(latestEntry)}</div>
             </div>
           </div>
         </>

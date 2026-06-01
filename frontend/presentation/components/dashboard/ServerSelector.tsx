@@ -16,7 +16,7 @@ export const ServerSelector = ({ selected, onChange }: Props) => {
   }, [onChange, selected, servers]);
 
   if (loading) {
-    return <span style={{ fontSize: 11, color: "#64748b" }}>...</span>;
+    return <span style={{ fontSize: 13, color: "#64748b" }}>...</span>;
   }
 
   return (
@@ -27,7 +27,7 @@ export const ServerSelector = ({ selected, onChange }: Props) => {
         gap: 8,
         marginLeft: 8,
         color: "#94a3b8",
-        fontSize: 11,
+        fontSize: 13,
         letterSpacing: 1,
       }}
     >
@@ -42,7 +42,7 @@ export const ServerSelector = ({ selected, onChange }: Props) => {
           border: "1px solid #334155",
           background: "#0f172a",
           color: "#e2e8f0",
-          fontSize: 12,
+          fontSize: 14,
           fontWeight: 600,
         }}
       >

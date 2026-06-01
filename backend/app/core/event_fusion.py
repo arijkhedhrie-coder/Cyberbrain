@@ -316,6 +316,42 @@ def _split_records(records: list[dict[str, Any]]) -> tuple[list[AttackEvent], li
     }
 
 
+def _health_weight(payload: dict[str, Any]) -> float:
+    return max(
+        _as_float(payload.get("row_count"), 0.0) or 0.0,
+        _as_float(payload.get("deduped_count"), 0.0) or 0.0,
+        _as_float(payload.get("nb_alarms"), 0.0) or 0.0,
+        1.0,
+    )
+
+
+def _aggregate_health_score(records: list[dict[str, Any]]) -> float | None:
+    latest_by_dataset: dict[str, tuple[datetime, float, float]] = {}
+
+    for record in records:
+        payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+        health_score = _as_float(payload.get("health_score"))
+        if health_score is None:
+            continue
+
+        dataset_id = str(record.get("dataset_id") or payload.get("dataset_id") or "").strip()
+        if not dataset_id:
+            continue
+
+        timestamp = _parse_iso(record.get("timestamp")) or datetime.min.replace(tzinfo=UTC)
+        weight = _health_weight(payload)
+        current = latest_by_dataset.get(dataset_id)
+        if current is None or timestamp >= current[0]:
+            latest_by_dataset[dataset_id] = (timestamp, health_score, weight)
+
+    if not latest_by_dataset:
+        return None
+
+    total_weight = sum(weight for _, _, weight in latest_by_dataset.values()) or float(len(latest_by_dataset))
+    weighted_health = sum(score * weight for _, score, weight in latest_by_dataset.values()) / total_weight
+    return round(weighted_health, 2)
+
+
 def _group_behavior_episodes(
     events: list[AttackEvent],
     *,
@@ -564,6 +600,10 @@ def fusion_summary(
         sum(point["risk_score"] for point in risk_series) / len(risk_series),
         2,
     ) if risk_series else 0.0
+    health_score = _aggregate_health_score(records)
+    if health_score is None:
+        health_score = 100.0
+    health_status = "HEALTHY" if health_score >= 90 else ("WARNING" if health_score >= 70 else "CRITICAL")
 
     return {
         "available": bool(records),
@@ -587,5 +627,7 @@ def fusion_summary(
         "current_risk_score": risk_series[-1]["risk_score"] if risk_series else 0.0,
         "peak_risk_score": peak_risk,
         "average_risk_score": average_risk,
+        "health_score": health_score,
+        "health_status": health_status,
         "top_attackers": attackers[:5],
     }

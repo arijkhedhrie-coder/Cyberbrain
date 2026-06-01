@@ -120,80 +120,11 @@ export function ThreatAnalyticsView({
     <div style={{ display: "grid", gap: 18 }}>
       <section style={sectionShell}>
         <div style={{ display: "grid", gap: 8, marginBottom: 18 }}>
-          <div
-            style={{
-              position: "relative",
-              padding: "18px 22px",
-              borderRadius: 14,
-              border: `1px solid ${globalState.levelColor}55`,
-              background: `linear-gradient(135deg, var(--card) 0%, ${globalState.glow} 180%)`,
-              boxShadow: `0 0 0 1px ${globalState.levelColor}11, 0 8px 32px rgba(0,0,0,0.35)`,
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                background: `radial-gradient(circle at 0% 50%, ${globalState.glow} 0%, transparent 60%)`,
-                pointerEvents: "none",
-              }}
-            />
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: "0.18em",
-                color: globalState.levelColor,
-                textTransform: "uppercase",
-                fontFamily: "var(--font-mono)",
-                marginBottom: 8,
-                position: "relative",
-              }}
-            >
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: globalState.levelColor,
-                  boxShadow: `0 0 10px ${globalState.levelColor}`,
-                  animation: "pulse-dot 1.6s ease-in-out infinite",
-                }}
-              />
-              État global · {globalState.level}
-            </div>
-            <div
-              style={{
-                fontFamily: "var(--font-display)",
-                fontSize: 20,
-                fontWeight: 600,
-                color: "var(--text-primary)",
-                letterSpacing: "-0.01em",
-                lineHeight: 1.3,
-                position: "relative",
-              }}
-            >
-              {globalState.headline}
-            </div>
-            <div
-              style={{
-                marginTop: 6,
-                fontSize: 12,
-                color: "var(--text-muted)",
-                position: "relative",
-              }}
-            >
-              {globalState.subline}
-            </div>
-          </div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: "#e2e8f0" }}>
+        
+          <div style={{ fontSize: 17, fontWeight: 800, color: "#e2e8f0"  }}>
             Évolution de la pression de menace
           </div>
-          <div style={{ fontSize: 13, color: "#8ba5c0", lineHeight: 1.65, maxWidth: 820 }}>
+          <div style={{ fontSize: 15, color: "#8ba5c0", lineHeight: 1.65, maxWidth: 820 }}>
             Le système a réduit la pression de menace de façon continue grâce aux contre-mesures IA.
           </div>
         </div>
@@ -210,10 +141,10 @@ export function ThreatAnalyticsView({
 
       <section style={sectionShell}>
         <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 800, color: "#e2e8f0" }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: "#e2e8f0" }}>
             Lecture en un coup d'œil
           </div>
-          <div style={{ fontSize: 13, color: "#8ba5c0", lineHeight: 1.65 }}>
+          <div style={{ fontSize: 15, color: "#8ba5c0", lineHeight: 1.65 }}>
             Les chiffres clés qui résument la courbe ci-dessus.
           </div>
         </div>
@@ -252,9 +183,9 @@ export function ThreatAnalyticsView({
             },
           ].map((card) => (
             <div key={card.label} style={metricCardStyle}>
-              <div style={{ fontSize: 11, color: "#7c8fa1", marginBottom: 10 }}>{card.label}</div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: card.tone, marginBottom: 6 }}>{card.value}</div>
-              <div style={{ fontSize: 11, color: "#8ba5c0", lineHeight: 1.5 }}>{card.sub}</div>
+              <div style={{ fontSize: 22, color: "#7dd3fc", marginBottom: 10 }}>{card.label}</div>
+              <div style={{ fontSize: 30, fontWeight: 800, color: card.tone, marginBottom: 6 }}>{card.value}</div>
+              <div style={{ fontSize: 15, color: "#8ba5c0", lineHeight: 1.5 }}>{card.sub}</div>
             </div>
           ))}
         </div>
@@ -262,10 +193,10 @@ export function ThreatAnalyticsView({
 
       <section style={sectionShell}>
         <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 800, color: "#e2e8f0" }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: "#e2e8f0" }}>
             Quand les attaques arrivent
           </div>
-          <div style={{ fontSize: 13, color: "#8ba5c0", lineHeight: 1.65 }}>
+          <div style={{ fontSize: 15, color: "#8ba5c0", lineHeight: 1.65 }}>
             Heatmap 7 jours × 24h — repère les fenêtres récurrentes pour planifier la défense.
           </div>
         </div>

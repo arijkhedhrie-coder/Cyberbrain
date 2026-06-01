@@ -1,5 +1,5 @@
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { FC, ReactNode } from "react";
 
 import type {
@@ -10,8 +10,9 @@ import type {
   TrustData,
   WorkflowActivity,
 } from "../../../shared/types/idps";
+import { getEngineTooltip, getMetricTooltip } from "../../../shared/constants/dashboardTooltips";
 import { RadarEngineChart } from "../charts/RadarEngineChart";
-import { AgentActivityFlow } from "./AgentActivityFlow";
+import { TooltipLabel } from "../common/TooltipLabel";
 // ═══════════════════════════════════════════════════════════════════════════════
 // Helpers visuels
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -38,26 +39,6 @@ const getEnginePressureVisual = (engine: EngineScore, alarms: AlarmItem[]) => {
   return { color: "#35d4ff", glow: "rgba(53,212,255,0.22)" };
 };
 
-const Card: FC<{ title: string; tag?: string; tagRed?: boolean; children: ReactNode; style?: React.CSSProperties }> = ({
-  title, tag, tagRed, children, style,
-}) => (
-  <div style={{ background: "var(--card,#fff)", border: "0.5px solid var(--border,#e5e7eb)", borderRadius: 8, padding: 14, ...style }}>
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-      <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text)" }}>{title}</span>
-      {tag && (
-        <span style={{
-          fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 500,
-          background: tagRed ? "#FCEBEB" : "var(--color-background-secondary,#f3f4f6)",
-          color:      tagRed ? "#A32D2D" : "var(--muted,#6b7280)",
-        }}>{tag}</span>
-      )}
-    </div>
-    {children}
-  </div>
-);
-
-
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // KPI Card row
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -69,10 +50,10 @@ export const KpiCard: FC<{ label: string; value: ReactNode; sub?: string; accent
     background: "var(--card,#fff)", border: `0.5px solid ${spike ? "#E24B4A44" : "var(--border,#e5e7eb)"}`,
     borderRadius: 8, padding: "10px 14px", flex: 1,
   }}>
-    <div style={{ fontSize: 10, color: "var(--muted,#6b7280)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 4 }}>{label}</div>
-    <div style={{ fontSize: 20, fontWeight: 500, color: accent, lineHeight: 1 }}>{value}</div>
-    {sub && <div style={{ fontSize: 10, color: "var(--muted,#6b7280)", marginTop: 4 }}>{sub}</div>}
-    {spike && <div style={{ fontSize: 9, color: "#A32D2D", marginTop: 3 }}>⚠ spike détecté</div>}
+    <div style={{ fontSize: 12, color: "var(--muted,#6b7280)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 4 }}>{label}</div>
+    <div style={{ fontSize: 22, fontWeight: 500, color: accent, lineHeight: 1 }}>{value}</div>
+    {sub && <div style={{ fontSize: 12, color: "var(--muted,#6b7280)", marginTop: 4 }}>{sub}</div>}
+    {spike && <div style={{ fontSize: 11, color: "#A32D2D", marginTop: 3 }}>⚠ spike détecté</div>}
   </div>
 );
 
@@ -86,7 +67,7 @@ export const PieChart: FC<{ alarms: AlarmItem[] }> = ({ alarms }) => {
   const total = Object.values(counts).reduce((s, v) => s + v, 0);
 
   if (total === 0) return (
-    <div style={{ textAlign: "center", padding: "20px 0", fontSize: 11, color: "var(--muted,#6b7280)" }}>
+    <div style={{ textAlign: "center", padding: "20px 0", fontSize: 13, color: "var(--muted,#6b7280)" }}>
       Aucune alarme à afficher
     </div>
   );
@@ -116,16 +97,16 @@ export const PieChart: FC<{ alarms: AlarmItem[] }> = ({ alarms }) => {
         ))}
         {/* centre */}
         <circle cx={cx} cy={cy} r={28} fill="var(--card,#fff)"/>
-        <text x={cx} y={cy - 5} textAnchor="middle" fontSize={10} fontWeight={500} fill="var(--text,#111)" fontFamily="inherit">{total}</text>
-        <text x={cx} y={cy + 8} textAnchor="middle" fontSize={8} fill="var(--muted,#6b7280)" fontFamily="inherit">alarmes</text>
+        <text x={cx} y={cy - 5} textAnchor="middle" fontSize={12} fontWeight={500} fill="var(--text,#111)" fontFamily="inherit">{total}</text>
+        <text x={cx} y={cy + 8} textAnchor="middle" fontSize={10} fill="var(--muted,#6b7280)" fontFamily="inherit">alarmes</text>
       </svg>
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         {entries.map(([sev, count]) => (
-          <div key={sev} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+          <div key={sev} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
             <div style={{ width: 8, height: 8, borderRadius: 2, background: SEV_COLOR[sev], flexShrink: 0 }}/>
             <span style={{ color: "var(--muted,#6b7280)", width: 58 }}>{sev}</span>
             <span style={{ fontWeight: 500, color: "var(--text)", fontFamily: "monospace" }}>{count}</span>
-            <span style={{ color: "var(--muted,#6b7280)", fontSize: 10 }}>({((count / total) * 100).toFixed(0)}%)</span>
+            <span style={{ color: "var(--muted,#6b7280)", fontSize: 12 }}>({((count / total) * 100).toFixed(0)}%)</span>
           </div>
         ))}
       </div>
@@ -139,7 +120,7 @@ export const PieChart: FC<{ alarms: AlarmItem[] }> = ({ alarms }) => {
 
 export const EngineBarChart: FC<{ engines: EngineScore[] }> = ({ engines }) => {
   if (!engines.length) return (
-    <div style={{ fontSize: 11, color: "var(--muted,#6b7280)", padding: "12px 0" }}>
+    <div style={{ fontSize: 13, color: "var(--muted,#6b7280)", padding: "12px 0" }}>
       Aucun résultat — pipeline non lancé
     </div>
   );
@@ -154,7 +135,12 @@ export const EngineBarChart: FC<{ engines: EngineScore[] }> = ({ engines }) => {
         return (
           <div key={e.engine}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-              <span style={{ fontSize: 10, color: "var(--muted,#6b7280)", width: 70, flexShrink: 0 }}>{e.engine}</span>
+              <span
+                title={getEngineTooltip(e.engine)}
+                style={{ fontSize: 12, color: "var(--muted,#6b7280)", width: 70, flexShrink: 0, cursor: "help" }}
+              >
+                {e.engine}
+              </span>
               <div style={{ flex: 1, height: 14, borderRadius: 3, background: "var(--color-background-secondary,#f3f4f6)", overflow: "hidden", position: "relative" }}>
                 <div style={{
                   height: "100%", borderRadius: 3, width: `${pct}%`,
@@ -162,21 +148,21 @@ export const EngineBarChart: FC<{ engines: EngineScore[] }> = ({ engines }) => {
                   transition: "width .5s ease",
                 }}/>
               </div>
-              <span style={{ fontSize: 11, fontWeight: 500, width: 24, textAlign: "right", color: isAlarm ? color : "var(--muted,#6b7280)", fontFamily: "monospace" }}>
+              <span style={{ fontSize: 13, fontWeight: 500, width: 24, textAlign: "right", color: isAlarm ? color : "var(--muted,#6b7280)", fontFamily: "monospace" }}>
                 {e.alarms ?? 0}
               </span>
               <span style={{
-                fontSize: 9, padding: "1px 5px", borderRadius: 3, fontWeight: 500, flexShrink: 0, minWidth: 38, textAlign: "center",
+                fontSize: 11, padding: "1px 5px", borderRadius: 3, fontWeight: 500, flexShrink: 0, minWidth: 38, textAlign: "center",
                 background: isAlarm ? "#FCEBEB" : "#E1F5EE",
                 color:      isAlarm ? "#A32D2D" : "#0F6E56",
               }}>
                 {e.status}
               </span>
               {e.rerun_p2 && (
-                <span style={{ fontSize: 9, color: "#854F0B", fontWeight: 500 }} title="Pass 2 réanalysé">P2</span>
+                <span style={{ fontSize: 11, color: "#854F0B", fontWeight: 500 }} title="Pass 2 réanalysé">P2</span>
               )}
             </div>
-            <div style={{ display: "flex", gap: 6, paddingLeft: 78, fontSize: 9, color: "var(--muted,#6b7280)" }}>
+            <div style={{ display: "flex", gap: 6, paddingLeft: 78, fontSize: 11, color: "var(--muted,#6b7280)" }}>
               <span>seuil P1: <b style={{ color: "var(--text)" }}>{e.pass1}</b></span>
               <span>·</span>
               <span>seuil P2: <b style={{ color: "var(--text)" }}>{e.pass2}</b></span>
@@ -198,6 +184,19 @@ export const FilteredAlarmFeed: FC<{ alarms: AlarmItem[]; wsConnected: boolean; 
   isFusionView,
 }) => {
   const [filter, setFilter] = useState<"ALL" | "CRITICAL" | "HIGH" | "MED">("ALL");
+  const filterLabel = (value: "ALL" | "CRITICAL" | "HIGH" | "MED") => {
+    if (value === "ALL") return "TOUT";
+    if (value === "CRITICAL") return "CRITIQUE";
+    if (value === "HIGH") return "ELEVE";
+    return "MOYEN";
+  };
+  const humanizeActionBadge = (action?: string) => {
+    const normalized = String(action ?? "").toUpperCase();
+    if (normalized.includes("BLOCK")) return "BLOCAGE";
+    if (normalized.includes("WATCH")) return "SURVEILLANCE";
+    if (normalized.includes("ALERT")) return "ALERTE";
+    return "ACTION";
+  };
 
   const filtered = filter === "ALL" ? alarms : alarms.filter(a => a.severity === filter);
   const filterBtns: Array<"ALL" | "CRITICAL" | "HIGH" | "MED"> = ["ALL", "CRITICAL", "HIGH", "MED"];
@@ -207,7 +206,7 @@ export const FilteredAlarmFeed: FC<{ alarms: AlarmItem[]; wsConnected: boolean; 
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
-        <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text)" }}>Live Alarm Feed</span>
+        <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>Flux d'alertes en direct</span>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {/* Filtre sévérité */}
           <div style={{ display: "flex", gap: 3 }}>
@@ -216,20 +215,20 @@ export const FilteredAlarmFeed: FC<{ alarms: AlarmItem[]; wsConnected: boolean; 
                 key={f}
                 onClick={() => setFilter(f)}
                 style={{
-                  fontSize: 9, padding: "2px 7px", borderRadius: 20, border: "0.5px solid",
+                  fontSize: 11, padding: "2px 7px", borderRadius: 20, border: "0.5px solid",
                   cursor: "pointer", fontFamily: "inherit", fontWeight: 500, transition: "all .15s",
                   borderColor: filter === f ? (SEV_COLOR[f] ?? "#1D9E75") : "var(--border,#e5e7eb)",
                   background:  filter === f ? (f === "ALL" ? "#E1F5EE" : `${SEV_COLOR[f]}22`) : "transparent",
                   color:       filter === f ? (f === "ALL" ? "#0F6E56" : SEV_COLOR[f]) : "var(--muted,#6b7280)",
                 }}
               >
-                {f} {f !== "ALL" && <span style={{ fontFamily: "monospace" }}>({alarms.filter(a => a.severity === f).length})</span>}
+                {filterLabel(f)} {f !== "ALL" && <span style={{ fontFamily: "monospace" }}>({alarms.filter(a => a.severity === f).length})</span>}
               </button>
             ))}
           </div>
           {/* Badge WS */}
           <span style={{
-            fontSize: 10, padding: "2px 7px", borderRadius: 20, fontWeight: 500,
+            fontSize: 12, padding: "2px 7px", borderRadius: 20, fontWeight: 500,
             display: "flex", alignItems: "center", gap: 4,
             background: wsConnected ? "#E1F5EE" : "#FCEBEB",
             color:      wsConnected ? "#085041" : "#A32D2D",
@@ -239,7 +238,7 @@ export const FilteredAlarmFeed: FC<{ alarms: AlarmItem[]; wsConnected: boolean; 
               background: wsConnected ? "#1D9E75" : "#E24B4A",
               animation: wsConnected ? "ws-pulse 2s infinite" : "none",
             }}/>
-            {wsConnected ? "WS actif" : "WS hors ligne"}
+          {wsConnected ? "WS actif" : "WS hors ligne"}
             <style>{`@keyframes ws-pulse{0%,100%{opacity:1}50%{opacity:.35}}`}</style>
           </span>
         </div>
@@ -247,8 +246,8 @@ export const FilteredAlarmFeed: FC<{ alarms: AlarmItem[]; wsConnected: boolean; 
 
       {/* Liste */}
       {filtered.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "16px 0", fontSize: 11, color: "var(--muted,#6b7280)" }}>
-          {wsConnected ? (filter === "ALL" ? "Aucune alarme — système clean ✓" : `Aucune alarme ${filter}`) : "En attente du pipeline…"}
+        <div style={{ textAlign: "center", padding: "16px 0", fontSize: 13, color: "var(--muted,#6b7280)" }}>
+          {wsConnected ? (filter === "ALL" ? "Aucune alerte — système calme ✓" : `Aucune alerte ${filterLabel(filter)}`) : "En attente du pipeline…"}
         </div>
       ) : filtered.slice(0, 8).map((a, i) => {
         const isLast = i === Math.min(filtered.length, 8) - 1;
@@ -265,32 +264,32 @@ export const FilteredAlarmFeed: FC<{ alarms: AlarmItem[]; wsConnected: boolean; 
           }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: SEV_COLOR[a.severity], marginTop: 4, flexShrink: 0 }}/>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 500, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {a.type.replace(/_/g, " ")} — <span style={{ color: SEV_COLOR[a.severity] }}>{a.severity}</span>
               </div>
-              <div style={{ fontSize: 10, color: "var(--muted,#6b7280)", fontFamily: "monospace" }}>
+              <div style={{ fontSize: 12, color: "var(--muted,#6b7280)", fontFamily: "monospace" }}>
                 {a.source_ip} · score <b>{a.score}</b> · {a.engine} · {a.country}
               </div>
               {a.human_insight && (
-                <div style={{ fontSize: 10, color: "var(--muted,#6b7280)", marginTop: 2, fontStyle: "italic", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <div style={{ fontSize: 12, color: "var(--muted,#6b7280)", marginTop: 2, fontStyle: "italic", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {a.human_insight.slice(0, 72)}{a.human_insight.length > 72 ? "…" : ""}
                 </div>
               )}
             </div>
-            <div style={{ fontSize: 10, color: "var(--muted,#6b7280)", flexShrink: 0 }}>{a.timestamp}</div>
+            <div style={{ fontSize: 12, color: "var(--muted,#6b7280)", flexShrink: 0 }}>{a.timestamp}</div>
             <span style={{
-              fontSize: 10, padding: "2px 6px", borderRadius: 3, fontWeight: 500, flexShrink: 0,
+              fontSize: 12, padding: "2px 6px", borderRadius: 3, fontWeight: 500, flexShrink: 0,
               background: isFusionView ? "#E6F1FB" : actionStyle.bg,
               color: isFusionView ? "#0C447C" : actionStyle.fg,
             }}>
-              {isFusionView ? "VIEW ONLY" : a.action.split("_")[0]}
+              {isFusionView ? "LECTURE SEULE" : humanizeActionBadge(a.action)}
             </span>
           </div>
         );
       })}
 
       {filtered.length > 8 && (
-        <div style={{ fontSize: 10, color: "var(--muted,#6b7280)", textAlign: "center", marginTop: 8, paddingTop: 6, borderTop: "0.5px solid var(--border,#e5e7eb)" }}>
+        <div style={{ fontSize: 12, color: "var(--muted,#6b7280)", textAlign: "center", marginTop: 8, paddingTop: 6, borderTop: "0.5px solid var(--border,#e5e7eb)" }}>
           +{filtered.length - 8} alarmes supplémentaires
         </div>
       )}
@@ -299,166 +298,6 @@ export const FilteredAlarmFeed: FC<{ alarms: AlarmItem[]; wsConnected: boolean; 
 };
 
 
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Agent workflow
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const AgentWorkflow: FC<{ decisions: AgentDecision[] }> = ({ decisions }) => {
-  const safe = Array.isArray(decisions) ? decisions : [];
-
-  if (!safe.length) return (
-    <div style={{ fontSize: 11, color: "var(--muted,#6b7280)", padding: "12px 0" }}>
-      Aucune décision — pipeline non lancé
-    </div>
-  );
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-      {safe.map((d, i) => {
-        const dd = d as any;
-const agent = dd.agent ?? dd.event_type ?? "Agent";
-const action = dd.action ?? dd.config ?? "—";
-const reasoning = dd.reasoning ?? dd.message ?? dd.note ?? "";
-const threat = dd.threat ?? "NORMAL";
-const confidence = typeof dd.confidence === "number" ? dd.confidence : 1.0;
-const ts = dd.ts ?? dd.timestamp ?? "";
-
-        const avatarColors: Record<string, { bg: string; fg: string }> = {
-          Collecteur:    { bg: "#E1F5EE", fg: "#0F6E56" },
-          Détecteur:     { bg: "#FCEBEB", fg: "#A32D2D" },
-          Orchestrateur: { bg: "#FAEEDA", fg: "#633806" },
-          Rapporteur:    { bg: "#E6F1FB", fg: "#185FA5" },
-        };
-        const av = avatarColors[agent] ?? { bg: "#F1EFE8", fg: "#5F5E5A" };
-        const threatColor = threat === "CRITICAL" ? "#A32D2D" : threat === "ELEVATED" ? "#854F0B" : "#0F6E56";
-
-        return (
-          <div key={String(dd.id ?? i)}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 0", borderBottom: i < safe.length - 1 ? "0.5px solid var(--border,#e5e7eb)" : "none" }}>
-              <div style={{
-                width: 28, height: 28, borderRadius: 7, display: "flex", alignItems: "center",
-                justifyContent: "center", fontSize: 10, fontWeight: 600, flexShrink: 0,
-                background: av.bg, color: av.fg,
-              }}>
-                {String(agent).slice(0, 2).toUpperCase()}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text)" }}>{agent}</span>
-                  <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 3, background: "var(--color-background-secondary,#f3f4f6)", color: "var(--muted,#6b7280)", fontFamily: "monospace" }}>
-                    {action}
-                  </span>
-                  <span style={{ fontSize: 10, color: threatColor, fontWeight: 500 }}>{threat}</span>
-                </div>
-                <div style={{ fontSize: 10, color: "var(--muted,#6b7280)", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {String(reasoning).slice(0, 80)}{reasoning.length > 80 ? "…" : ""}
-                </div>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
-                <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text)" }}>
-                  {(confidence * 100).toFixed(0)}%
-                </span>
-                <span style={{ fontSize: 9, color: "var(--muted,#6b7280)" }}>{String(ts).slice(11, 19)}</span>
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Trust Gate enrichi
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const TrustPanel: FC<{ trust: TrustData | null; isFusionView: boolean }> = ({ trust, isFusionView }) => {
-  if (!trust?.available) return (
-    <div style={{ fontSize: 11, color: "var(--muted,#6b7280)" }}>
-      {trust?.signals_summary ?? "Lance le pipeline pour obtenir le trust score."}
-    </div>
-  );
-
-  const score = trust.confidence_in_metrics ?? 0;
-  const scoreColor = score >= 0.8 ? "#0F6E56" : score >= 0.6 ? "#854F0B" : "#A32D2D";
-  const pct = Math.round(score * 100);
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {/* Score principal avec arc */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ position: "relative", width: 56, height: 56, flexShrink: 0 }}>
-          <svg viewBox="0 0 56 56" width={56} height={56}>
-            <circle cx={28} cy={28} r={24} fill="none" stroke="var(--color-background-secondary,#f3f4f6)" strokeWidth={5}/>
-            <circle cx={28} cy={28} r={24} fill="none" stroke={scoreColor} strokeWidth={5}
-              strokeDasharray={`${(pct / 100) * 150.8} 150.8`}
-              strokeLinecap="round" transform="rotate(-90 28 28)"/>
-          </svg>
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: scoreColor }}>{pct}%</span>
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{trust.confidence_label}</div>
-          <div style={{ fontSize: 10, color: "var(--muted,#6b7280)", marginTop: 2 }}>Score de confiance</div>
-        </div>
-      </div>
-
-      {/* Métriques */}
-      {([
-        ["Accord modèles",  `${((trust.model_agreement ?? 0) * 100).toFixed(0)}%`,  (trust.model_agreement ?? 0) >= 0.8],
-        ["Taux FP",         `${((trust.false_positive_rate ?? 0) * 100).toFixed(1)}%`, (trust.false_positive_rate ?? 0) <= 0.1],
-        ["Drift",           `${trust.drift_score?.toFixed(3) ?? "—"} (${trust.drift_label})`, !trust.drift_flagged],
-        ["Stabilité",       trust.stability, trust.stability === "HIGH"],
-      ] as [string, string, boolean][]).map(([k, v, ok]) => (
-        <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
-          <span style={{ color: "var(--muted,#6b7280)" }}>{k}</span>
-          <span style={{ color: ok ? "#0F6E56" : "#A32D2D", fontFamily: "monospace", fontWeight: 500 }}>{v}</span>
-        </div>
-      ))}
-
-      {trust.drift_flagged && (
-        <div style={{ fontSize: 10, padding: "4px 8px", borderRadius: 4, background: "#FCEBEB", color: "#A32D2D", fontWeight: 500 }}>
-          {isFusionView
-            ? "Drift elevated in one or more local datasets. Review retraining per dataset only."
-            : "Drift détecté — réentraînement recommandé"}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Terminal
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const Terminal: FC<{ lines: string[] }> = ({ lines }) => (
-  <div style={{
-    background: "#111827", borderRadius: 6, padding: "8px 10px",
-    fontFamily: "monospace", fontSize: 10, color: "#9ca3af",
-    maxHeight: 120, overflowY: "auto", lineHeight: 1.8,
-  }}>
-    {lines.length === 0
-      ? <span style={{ color: "#4b5563" }}>En attente des logs pipeline…</span>
-      : lines.map((l, i) => {
-          const color = l.includes("[ERROR") ? "#E24B4A"
-            : l.includes("[WARN") ? "#EF9F27"
-            : l.includes("[PASS1") || l.includes("[PASS2") ? "#EF9F27"
-            : l.includes("[AGENTS") || l.includes("[PIPELINE") || l.includes("[SESSION") ? "#1D9E75"
-            : l.includes("[TRUST") ? "#378ADD"
-            : "#9ca3af";
-          const sp = l.indexOf(" ");
-          return (
-            <div key={i}>
-              <span style={{ color: "#4b5563" }}>{l.slice(0, sp)}</span>
-              <span style={{ color }}>{l.slice(sp)}</span>
-            </div>
-          );
-        })
-    }
-  </div>
-);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Props + composant principal
@@ -530,7 +369,7 @@ const StoryBanner: FC<{
       }}/>
       <div style={{
         display: "flex", alignItems: "center", gap: 10,
-        fontSize: 10, fontWeight: 700, letterSpacing: "0.18em",
+        fontSize: 12, fontWeight: 700, letterSpacing: "0.18em",
         color: levelColor, textTransform: "uppercase",
         fontFamily: "var(--font-mono)", marginBottom: 8,
       }}>
@@ -543,13 +382,13 @@ const StoryBanner: FC<{
       </div>
       <div style={{
         fontFamily: "var(--font-display)",
-        fontSize: 20, fontWeight: 600, color: "var(--text-primary)",
+        fontSize: 22, fontWeight: 600, color: "var(--text-primary)",
         letterSpacing: "-0.01em", lineHeight: 1.3, position: "relative",
       }}>
         {headline}
       </div>
       <div style={{
-        marginTop: 6, fontSize: 12, color: "var(--text-muted)",
+        marginTop: 6, fontSize: 14, color: "var(--text-muted)",
         position: "relative",
       }}>
         {sub}
@@ -562,8 +401,8 @@ const StoryBanner: FC<{
 // NEW · Big clean KPI tile (storytelling row)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const KpiTile: FC<{ label: string; value: ReactNode; accent?: string; sub?: string }> = ({
-  label, value, accent = "var(--text-primary)", sub,
+const KpiTile: FC<{ label: string; value: ReactNode; accent?: string; sub?: string; tooltip?: string }> = ({
+  label, value, accent = "var(--text-primary)", sub, tooltip,
 }) => (
   <div style={{
     flex: 1, minWidth: 140,
@@ -577,15 +416,17 @@ const KpiTile: FC<{ label: string; value: ReactNode; accent?: string; sub?: stri
   onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.transform = "translateY(0)"; }}
   >
     <div style={{
-      fontSize: 9.5, fontWeight: 700, letterSpacing: "0.12em",
-      color: "var(--text-muted)", textTransform: "uppercase",
+      fontSize: 12.5, fontWeight: 700, letterSpacing: "0.12em",
+      color: "#7dd3fc", textTransform: "uppercase",
       fontFamily: "var(--font-mono)", marginBottom: 8,
-    }}>{label}</div>
+    }}>
+      {tooltip ? <TooltipLabel tooltip={tooltip} style={{ gap: 4 }}>{label}</TooltipLabel> : label}
+    </div>
     <div style={{
-      fontFamily: "var(--font-mono)", fontSize: 26, fontWeight: 700,
+      fontFamily: "var(--font-mono)", fontSize: 28, fontWeight: 700,
       color: accent, lineHeight: 1, letterSpacing: "-0.5px",
     }}>{value}</div>
-    {sub && <div style={{ marginTop: 6, fontSize: 10, color: "var(--text-muted)" }}>{sub}</div>}
+    {sub && <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>{sub}</div>}
   </div>
 );
 
@@ -602,7 +443,8 @@ const PressureMeter: FC<{ value: number; max: number; color: string }> = ({ valu
         width: 92,
         height: 8,
         borderRadius: 999,
-        overflow: "hidden",
+        overflow: "visible",
+        position: "relative",
         background: "rgba(148,163,184,0.12)",
         border: "1px solid rgba(148,163,184,0.12)",
       }}
@@ -634,12 +476,12 @@ const EnginePressurePanel: FC<{ engines: EngineScore[]; alarms: AlarmItem[] }> =
     }}>
       <div style={{ marginBottom: 4 }}>
         <div style={{
-          fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 600,
+          fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 600,
           color: "var(--text-primary)", letterSpacing: "-0.005em",
         }}>
           Pression par moteur de détection
         </div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
+        <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 3 }}>
           Fingerprint live des moteurs à gauche, détail des seuils et de la pression en temps réel à droite.
         </div>
       </div>
@@ -663,7 +505,7 @@ const EnginePressurePanel: FC<{ engines: EngineScore[]; alarms: AlarmItem[] }> =
               borderRadius: 12,
               border: "1px dashed var(--border)",
               color: "var(--text-muted)",
-              fontSize: 12,
+              fontSize: 14,
               textAlign: "center",
               padding: 18,
             }}>
@@ -687,19 +529,16 @@ const EnginePressurePanel: FC<{ engines: EngineScore[]; alarms: AlarmItem[] }> =
                     animation: (e.alarms ?? 0) > 0 ? "pulse-dot 1.4s ease-in-out infinite" : "none",
                   }}/>
                   <span style={{
-                    fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 700,
+                    fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700,
                     color: "var(--text-primary)", letterSpacing: "0.08em",
                   }}>
                     {e.engine}
                   </span>
                   <div style={{ display: "grid", gap: 4 }}>
-                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                      Seuils <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>{e.pass1}/{e.pass2}</span>
-                    </span>
                     <PressureMeter value={e.alarms ?? 0} max={maxAlarms} color={visual.color} />
                   </div>
                   <span style={{
-                    fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 700,
+                    fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 700,
                     color: visual.color,
                     minWidth: 20, textAlign: "right",
                   }}>
@@ -737,7 +576,7 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
       borderRadius: 14,
       padding: "16px 18px",
       display: "flex", flexDirection: "column", gap: 14,
-      height: 340,
+      height: 470,
       overflow: "hidden",
     }}>
       <style>{`
@@ -783,7 +622,7 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div style={{
-          fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 600,
+          fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 600,
           color: "var(--text-primary)",
         }}>
           Flux d'alertes en direct
@@ -791,7 +630,7 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
         {criticals > 0 && (
           <span style={{
             padding: "4px 12px", borderRadius: 999,
-            fontSize: 10, fontWeight: 700, letterSpacing: "0.1em",
+            fontSize: 12, fontWeight: 700, letterSpacing: "0.1em",
             fontFamily: "var(--font-mono)",
             background: "rgba(255,85,119,0.12)",
             color: "var(--red)",
@@ -816,7 +655,7 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
                 background: active ? `${option.color}18` : "rgba(15,23,42,0.3)",
                 color: active ? option.color : "var(--text-muted)",
                 fontFamily: "var(--font-mono)",
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: 700,
                 letterSpacing: "0.08em",
                 cursor: "pointer",
@@ -832,7 +671,7 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
       {list.length === 0 ? (
         <div style={{
           flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 12, color: "var(--text-muted)",
+          fontSize: 14, color: "var(--text-muted)",
         }}>
           Aucune alarme pour ce filtre.
         </div>
@@ -866,7 +705,7 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
                     animation: a.severity === "CRITICAL" ? "pulse-dot 1.2s ease-in-out infinite" : "none",
                   }}/>
                   <span style={{
-                    fontFamily: "var(--font-mono)", fontSize: 10,
+                    fontFamily: "var(--font-mono)", fontSize: 12,
                     color: "var(--text-muted)", fontWeight: 600,
                   }}>
                     {String(a.timestamp).slice(11, 16) || "—"}
@@ -874,21 +713,21 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{
-                    fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700,
+                    fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 700,
                     color: "var(--text-primary)", letterSpacing: "0.04em",
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}>
                     {a.type.replace(/_/g, " ")} · {a.source_ip}
                   </div>
                   <div style={{
-                    fontSize: 10.5, color: "var(--text-muted)", marginTop: 2,
+                    fontSize: 12.5, color: "var(--text-muted)", marginTop: 2,
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}>
                     {a.country || "—"} · {a.engine} · {isFusionView ? "view only" : (a.action || "—").split("_")[0]}
                   </div>
                 </div>
                 <div style={{
-                  fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 700,
+                  fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 700,
                   color: sev, minWidth: 32, textAlign: "right",
                 }}>
                   {a.score ?? 0}
@@ -907,126 +746,63 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
 // NEW · Journey Pipeline — "Parcours du système"
 // ═══════════════════════════════════════════════════════════════════════════════
 
-type JourneyVisualState = "completed" | "active" | "skipped" | "error" | "pending";
+type JourneyVisualState = "done" | "active" | "pending" | "error";
 
 const JourneyPipeline: FC<{
   trust: TrustData | null;
   activities: WorkflowActivity[];
-}> = ({ trust, activities }) => {
-  const liveWindowStartedAt = useRef(Date.now());
-  const liveWindowStart = liveWindowStartedAt.current - 1500;
-
-  const liveActivities = activities.filter((activity) => {
-    const ts = Date.parse(activity.timestamp);
-    return Number.isFinite(ts) && ts >= liveWindowStart;
-  });
-
-  const liveSessionId =
-    liveActivities.find((activity) => !!activity.session_id)?.session_id ?? null;
-  const scopedActivities = liveSessionId
-    ? liveActivities.filter((activity) => activity.session_id === liveSessionId)
-    : liveActivities;
-
-  const hasEvent = (eventType: string) =>
-    scopedActivities.some((activity) => activity.event_type === eventType);
-
-  const pipelineStarted = hasEvent("PIPELINE_START");
-  const metricsDone = hasEvent("METRICS_COMPUTED");
-  const pass1Done = hasEvent("PASS1_COMPLETE");
-  const trustDone = hasEvent("TRUST_COMPUTED");
-  const pass2Skipped = hasEvent("DYNAMIC_CONFIG_DEFAULT");
-  const pass2Issued = hasEvent("DYNAMIC_CONFIG_ISSUED");
-  const pass2Done = hasEvent("PASS2_COMPLETE");
-  const agentsDone = hasEvent("AGENTS_COMPLETE");
-  const sessionDone = hasEvent("SESSION_SUMMARY");
+  isLive: boolean;
+}> = ({ trust, activities, isLive }) => {
+  const latestActivities = [...activities].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  const latestSessionId = latestActivities.find((activity) => !!activity.session_id)?.session_id ?? null;
+  const scopedActivities = latestSessionId
+    ? latestActivities.filter((activity) => activity.session_id === latestSessionId)
+    : latestActivities;
 
   const baseStages = [
-    {
-      id: "collecte",
-      label: "Collecte",
-      technical: "PIPELINE_START",
-      tooltip: "Ingestion des logs et demarrage du pipeline.",
-      state: pipelineStarted ? "completed" : "pending",
-    },
-    {
-      id: "analyse",
-      label: "Analyse",
-      technical: "METRICS_COMPUTED",
-      tooltip: "Calcul des metriques et lecture du contexte de securite.",
-      state: metricsDone ? "completed" : "pending",
-    },
-    {
-      id: "pass1",
-      label: "Detection initiale",
-      technical: "PASS1_COMPLETE",
-      tooltip: "Analyse initiale des anomalies et comportements suspects.",
-      state: pass1Done ? "completed" : "pending",
-    },
-    {
-      id: "trust",
-      label: "Verification IA",
-      technical: "TRUST_COMPUTED",
-      tooltip: "Validation de fiabilite via trust score et stabilite.",
-      state: trustDone ? "completed" : "pending",
-    },
-    {
-      id: "pass2",
-      label: "Reanalyse adaptative",
-      technical: pass2Skipped ? "DYNAMIC_CONFIG_DEFAULT" : "PASS2_COMPLETE",
-      tooltip: "Analyse secondaire avec ajustements adaptatifs si necessaire.",
-      state: pass2Done ? "completed" : pass2Skipped ? "skipped" : "pending",
-    },
-    {
-      id: "agents",
-      label: "Decision IA",
-      technical: "AGENTS_COMPLETE",
-      tooltip: "Coordination des agents pour choisir la reponse finale.",
-      state: agentsDone ? "completed" : "pending",
-    },
-    {
-      id: "session",
-      label: "Session finale",
-      technical: "SESSION_SUMMARY",
-      tooltip: "Synthese de fin de session et publication du resultat.",
-      state: sessionDone ? "completed" : "pending",
-    },
-  ] as const satisfies Array<{
-    id: string;
-    label: string;
-    technical: string;
-    tooltip: string;
-    state: Exclude<JourneyVisualState, "active" | "error">;
-  }>;
+    { id: "collecte", label: "Collecte", technical: "PIPELINE_START", tooltip: "Ingestion des logs et demarrage du pipeline." },
+    { id: "analyse", label: "Analyse", technical: "METRICS_COMPUTED", tooltip: "Calcul des metriques et lecture du contexte de securite." },
+    { id: "pass1", label: "Detection initiale", technical: "PASS1_COMPLETE", tooltip: "Analyse initiale des anomalies et comportements suspects." },
+    { id: "trust", label: "Verification IA", technical: "TRUST_COMPUTED", tooltip: "Validation de fiabilite via trust score et stabilite." },
+    { id: "pass2", label: "Reanalyse adaptative", technical: "PASS2_COMPLETE", tooltip: "Analyse secondaire avec ajustements adaptatifs si necessaire." },
+    { id: "agents", label: "Decision IA", technical: "AGENTS_COMPLETE", tooltip: "Coordination des agents pour choisir la reponse finale." },
+    { id: "session", label: "Session finale", technical: "SESSION_SUMMARY", tooltip: "Synthese de fin de session et publication du resultat." },
+  ] as const;
 
-  const firstPendingIndex = baseStages.findIndex((stage) => stage.state === "pending");
-  const lastResolvedIndex = Math.max(
-    ...baseStages.map((stage, index) => (stage.state === "pending" ? -1 : index)),
-  );
-  const explicitActiveIndex = pass2Issued && !pass2Done && !pass2Skipped ? 4 : -1;
+  const hasEvent = (eventType: string) => scopedActivities.some((activity) => activity.event_type === eventType);
+  const pipelineStarted = hasEvent("PIPELINE_START");
+  const sessionDone = hasEvent("SESSION_SUMMARY");
 
-  let activeIndex = -1;
-  if (pipelineStarted && !sessionDone) {
-    activeIndex = explicitActiveIndex >= 0 ? explicitActiveIndex : firstPendingIndex;
-  }
+  const eventIndexByType = new Map<string, number>([
+    ["PIPELINE_START", 0],
+    ["METRICS_COMPUTED", 1],
+    ["PASS1_COMPLETE", 2],
+    ["TRUST_COMPUTED", 3],
+    ["PASS2_COMPLETE", 4],
+    ["DYNAMIC_CONFIG_DEFAULT", 4],
+    ["AGENTS_COMPLETE", 5],
+    ["SESSION_SUMMARY", 6],
+  ]);
 
-  const latestErrorActivity =
-    [...scopedActivities].reverse().find((activity) => activity.status === "error" || activity.event_type === "ERROR") ?? null;
-  const hasPipelineError = latestErrorActivity !== null;
-  const errorIndex =
-    hasPipelineError && !sessionDone
-      ? Math.max(activeIndex, Math.min(lastResolvedIndex + 1, baseStages.length - 1))
-      : -1;
+  const latestCompletedIndex = scopedActivities.reduce((max, activity) => {
+    const eventType = activity.event_type ?? "";
+    if (eventType === "ERROR" || eventType === "DYNAMIC_CONFIG_ISSUED") return max;
+    const index = eventIndexByType.get(eventType);
+    return index == null ? max : Math.max(max, index);
+  }, -1);
 
+  const latestErrorActivity = [...scopedActivities].find((activity) => activity.status === "error" || activity.event_type === "ERROR") ?? null;
+  const activeIndex = pipelineStarted && !sessionDone ? Math.min(latestCompletedIndex + 1, baseStages.length - 1) : -1;
+  const errorIndex = latestErrorActivity && !sessionDone
+    ? Math.max(activeIndex, Math.min(latestCompletedIndex + 1, baseStages.length - 1))
+    : -1;
+  const livePulseActive = isLive && activeIndex >= 0 && !latestErrorActivity;
   const stages = baseStages.map((stage, index) => {
-    let visualState: JourneyVisualState = stage.state;
+    let visualState: JourneyVisualState = "pending";
     if (index === errorIndex) visualState = "error";
-    else if (stage.state === "pending" && index === activeIndex) visualState = "active";
-    return {
-      ...stage,
-      key: stage.label,
-      done: stage.state === "completed",
-      visualState,
-    };
+    else if (sessionDone || index <= latestCompletedIndex) visualState = "done";
+    else if (index === activeIndex) visualState = "active";
+    return { ...stage, key: stage.label, visualState };
   });
 
   const lastSignal =
@@ -1067,89 +843,17 @@ const JourneyPipeline: FC<{
         : stabilityLabel === "LOW"
           ? "#ff5b7f"
           : "var(--text-muted)";
-  const trustHighlights = [
-    trust?.model_agreement == null
-      ? null
-      : trust.model_agreement >= 0.8
-        ? "Les modeles sont en accord eleve"
-        : trust.model_agreement >= 0.6
-          ? "Les modeles restent globalement coherents"
-          : "Les modeles montrent un accord plus fragile",
-    trust?.false_positive_rate == null
-      ? null
-      : trust.false_positive_rate <= 0.1
-        ? "Le taux de faux positifs reste faible"
-        : trust.false_positive_rate <= 0.25
-          ? "Le bruit reste sous controle"
-          : "Le taux de faux positifs demande plus de vigilance",
-    trust?.drift_flagged
-      ? "Un changement de comportement reduit la confiance"
-      : trust?.stability === "HIGH" || (trust?.stable_signals ?? 0) >= 3
-        ? "Le comportement du systeme est stable"
-        : trust?.stability === "MEDIUM" || (trust?.stable_signals ?? 0) >= 1
-          ? "La stabilite recente reste correcte"
-          : trust?.drift_score != null || trust?.stability != null
-            ? "La stabilite recente limite un peu la confiance"
-            : null,
-  ].filter((item): item is string => Boolean(item)).slice(0, 3);
-  const dominantSignal =
-    trust?.drift_flagged
-      ? "Drift detecte dans le comportement recent"
-      : trust?.model_agreement != null && trust.model_agreement >= 0.85
-        ? "Accord modele eleve"
-        : trust?.false_positive_rate != null && trust.false_positive_rate <= 0.1
-          ? "Faible risque de faux positifs"
-          : trust?.stability === "HIGH" || (trust?.stable_signals ?? 0) >= 3
-            ? "Signaux stables sur les dernieres sessions"
-            : null;
 
   const getTone = (state: JourneyVisualState) => {
     switch (state) {
-      case "completed":
-        return {
-          border: "#2dd4a8",
-          background: "rgba(45,212,168,0.12)",
-          text: "#9ae6c8",
-          shadow: "0 0 14px rgba(45,212,168,0.22)",
-          line: "rgba(45,212,168,0.72)",
-          icon: "✓",
-        };
+      case "done":
+        return { border: "#2dd4a8", background: "rgba(45,212,168,0.12)", text: "#9ae6c8", shadow: "0 0 14px rgba(45,212,168,0.22)", line: "rgba(45,212,168,0.72)", icon: "✓" };
       case "active":
-        return {
-          border: "#35d4ff",
-          background: "rgba(53,212,255,0.14)",
-          text: "#8ee8ff",
-          shadow: "0 0 16px rgba(53,212,255,0.24)",
-          line: "rgba(53,212,255,0.7)",
-          icon: "•",
-        };
-      case "skipped":
-        return {
-          border: "#5b7cff",
-          background: "rgba(91,124,255,0.14)",
-          text: "#a8b6ff",
-          shadow: "0 0 14px rgba(91,124,255,0.2)",
-          line: "rgba(91,124,255,0.68)",
-          icon: "S",
-        };
+        return { border: "#35d4ff", background: "rgba(53,212,255,0.14)", text: "#8ee8ff", shadow: "0 0 16px rgba(53,212,255,0.24)", line: "rgba(53,212,255,0.7)", icon: "•" };
       case "error":
-        return {
-          border: "#ff5b7f",
-          background: "rgba(255,91,127,0.14)",
-          text: "#ff9eb0",
-          shadow: "0 0 16px rgba(255,91,127,0.24)",
-          line: "rgba(255,91,127,0.72)",
-          icon: "!",
-        };
+        return { border: "#ff5b7f", background: "rgba(255,91,127,0.14)", text: "#ff9eb0", shadow: "0 0 16px rgba(255,91,127,0.24)", line: "rgba(255,91,127,0.72)", icon: "!" };
       default:
-        return {
-          border: "rgba(112,138,167,0.45)",
-          background: "rgba(15,23,42,0.18)",
-          text: "var(--text-muted)",
-          shadow: "none",
-          line: "rgba(112,138,167,0.3)",
-          icon: "○",
-        };
+        return { border: "rgba(112,138,167,0.45)", background: "rgba(15,23,42,0.18)", text: "var(--text-muted)", shadow: "none", line: "rgba(112,138,167,0.3)", icon: "◦" };
     }
   };
 
@@ -1159,130 +863,51 @@ const JourneyPipeline: FC<{
         background: "var(--card)",
         border: "1px solid var(--border)",
         borderRadius: 14,
-        padding: "14px 16px",
+        padding: "18px 20px",
         display: "flex",
         flexDirection: "column",
-        gap: 12,
-        height: 316,
+        gap: 16,
+        height: 330,
         overflow: "visible",
+        position: "relative",
       }}
     >
-      <style>{`
-        .journey-stage {
-          position: relative;
-        }
-        .journey-tooltip {
-          position: absolute;
-          left: 50%;
-          bottom: calc(100% + 12px);
-          transform: translate(-50%, 8px);
-          opacity: 0;
-          visibility: hidden;
-          pointer-events: none;
-          transition: opacity .18s ease, transform .18s ease, visibility .18s ease;
-          width: max-content;
-          max-width: 220px;
-          padding: 10px 12px;
-          border-radius: 12px;
-          border: 1px solid rgba(83,103,134,0.35);
-          background: linear-gradient(180deg, rgba(7,14,24,0.98), rgba(10,20,34,0.94));
-          box-shadow: 0 14px 32px rgba(2,6,23,0.36);
-          z-index: 4;
-          text-align: left;
-        }
-        .journey-stage:hover .journey-tooltip {
-          opacity: 1;
-          visibility: visible;
-          transform: translate(-50%, 0);
-        }
-      `}</style>
+      <style>{`\n        @keyframes journey-live-pulse { 0%,100% { opacity: 1; } 50% { opacity: .42; } }\n        .journey-stage { position: relative; z-index: 2; }\n      `}</style>
 
       <div>
         <div
           style={{
             fontFamily: "var(--font-display)",
-            fontSize: 14,
+            fontSize: 16,
             fontWeight: 600,
             color: "var(--text-primary)",
           }}
         >
           Parcours du systeme
         </div>
-        <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 3 }}>
+        <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 18 }}>
           Lecture live du dernier passage du pipeline.
         </div>
-        {lastSignal && (
-          <div
-            style={{
-              marginTop: 6,
-              display: "inline-flex",
-              maxWidth: "100%",
-              padding: "4px 9px",
-              borderRadius: 999,
-              border: "1px solid rgba(125,211,252,0.18)",
-              background: "rgba(125,211,252,0.08)",
-              color: "#7dd3fc",
-              fontSize: 9.5,
-              fontWeight: 700,
-              letterSpacing: "0.06em",
-              fontFamily: "var(--font-mono)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            Dernier signal · {lastSignal}
-          </div>
-        )}
       </div>
 
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 6,
-          position: "relative",
-          minHeight: 0,
-          overflow: "visible",
-        }}
-      >
+      <div style={{ flex: 1, minHeight: 0, overflowX: "auto", overflowY: "visible", paddingTop: 30, paddingBottom: 16 }}>
+        <div style={{ minWidth: 900, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 0, position: "relative" }}>
         {stages.map((stage, index) => {
           const tone = getTone(stage.visualState);
           const nextTone = index < stages.length - 1 ? getTone(stages[index + 1].visualState) : null;
+          const isActive = stage.visualState === "active";
+          const isDone = stage.visualState === "done";
 
           return (
-            <div
-              key={stage.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                flex: index === stages.length - 1 ? "0 0 auto" : 1,
-              }}
-            >
-              <div className="journey-stage" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 7 }}>
-                <div className="journey-tooltip" role="tooltip">
-                  <div style={{ fontSize: 10.5, lineHeight: 1.35, color: "var(--text-primary)", fontWeight: 600 }}>
-                    {stage.tooltip}
-                  </div>
-                  <div
-                    style={{
-                      marginTop: 6,
-                      fontSize: 9,
-                      letterSpacing: "0.08em",
-                      fontFamily: "var(--font-mono)",
-                      color: "#7dd3fc",
-                    }}
-                  >
-                    {stage.technical}
-                  </div>
-                </div>
-
+            <div key={stage.id} style={{ display: "flex", alignItems: "center", flex: "0 0 auto", minWidth: 104 }}>
+              <div
+                className="journey-stage"
+                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, minWidth: 104 }}
+              >
                 <div
                   style={{
-                    width: 30,
-                    height: 30,
+                    width: 34,
+                    height: 34,
                     borderRadius: "50%",
                     display: "flex",
                     alignItems: "center",
@@ -1290,28 +915,17 @@ const JourneyPipeline: FC<{
                     border: `1.5px solid ${tone.border}`,
                     background: tone.background,
                     color: tone.text,
-                    fontSize: 12,
+                    fontSize: 15,
                     fontWeight: 700,
-                    boxShadow: tone.shadow,
+                    boxShadow: isActive && livePulseActive ? "0 0 18px rgba(53,212,255,0.32)" : tone.shadow,
                     transition: "all .24s ease",
-                    animation: stage.visualState === "active" ? "pulse-dot 1.4s ease-in-out infinite" : "none",
+                    animation: isActive && livePulseActive ? "journey-live-pulse 1.4s ease-in-out infinite" : "none",
                   }}
                 >
                   {tone.icon}
                 </div>
 
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 8.6,
-                    fontWeight: 700,
-                    letterSpacing: "0.04em",
-                    color: tone.text,
-                    textAlign: "center",
-                    lineHeight: 1.15,
-                    maxWidth: 76,
-                  }}
-                >
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.4, fontWeight: 700, letterSpacing: "0.04em", color: isDone ? "var(--text-secondary)" : isActive ? "var(--amber)" : "var(--text-muted)", textAlign: "center", lineHeight: 1.2, maxWidth: 100, whiteSpace: "normal" }}>
                   {stage.label}
                 </span>
               </div>
@@ -1319,14 +933,15 @@ const JourneyPipeline: FC<{
               {index < stages.length - 1 && (
                 <div
                   style={{
-                    flex: 1,
-                    height: 1.5,
-                    margin: "0 5px",
-                    marginBottom: 24,
+                    flex: "0 0 20px",
+                    width: 20,
+                    height: 2,
+                    margin: "0 6px",
+                    marginBottom: 26,
                     borderRadius: 999,
                     background:
                       stage.visualState === "pending" && stages[index + 1].visualState === "pending"
-                        ? "rgba(112,138,167,0.24)"
+                        ? "rgba(112,138,167,0.22)"
                         : `linear-gradient(90deg, ${tone.line}, ${nextTone?.line ?? tone.line})`,
                     opacity: 0.9,
                   }}
@@ -1335,6 +950,7 @@ const JourneyPipeline: FC<{
             </div>
           );
         })}
+        </div>
       </div>
 
       <div
@@ -1349,15 +965,27 @@ const JourneyPipeline: FC<{
         <div
           style={{
             display: "flex",
-            alignItems: "flex-start",
+            alignItems: "flex-end",
             justifyContent: "space-between",
             gap: 12,
+            flexWrap: "wrap",
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 0 }}>
             <div
               style={{
-                fontSize: 9,
+                fontFamily: "var(--font-mono)",
+                fontSize: 21,
+                fontWeight: 700,
+                color: confidenceTone,
+                lineHeight: 1,
+              }}
+            >
+              {confidence == null ? "--" : `${confidence}%`}
+            </div>
+            <div
+              style={{
+                fontSize: 11,
                 fontWeight: 700,
                 letterSpacing: "0.14em",
                 color: "var(--text-muted)",
@@ -1365,31 +993,36 @@ const JourneyPipeline: FC<{
                 fontFamily: "var(--font-mono)",
               }}
             >
-              Niveau de confiance
+              <TooltipLabel tooltip={getMetricTooltip("confidence")} style={{ gap: 4 , color: "#7dd3fc"  }}>
+                Niveau de confiance
+              </TooltipLabel>
             </div>
-            <div
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 19,
-                fontWeight: 700,
-                color: confidenceTone,
-              }}
-            >
-              {confidence == null ? "--" : `${confidence}%`}
-            </div>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-end",
+              gap: 6,
+              flexShrink: 0,
+              paddingBottom: 2,
+            }}
+          >
             <div
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 8,
                 flexWrap: "wrap",
+                justifyContent: "flex-end",
               }}
             >
               <span
                 style={{
                   padding: "4px 10px",
                   borderRadius: 999,
-                  fontSize: 9.5,
+                  fontSize: 11.5,
                   fontWeight: 700,
                   letterSpacing: "0.1em",
                   fontFamily: "var(--font-mono)",
@@ -1400,20 +1033,32 @@ const JourneyPipeline: FC<{
               >
                 {confidence == null ? "--" : confLabel}
               </span>
+            </div>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+                justifyContent: "flex-end",
+              }}
+            >
               <span
                 style={{
-                  fontSize: 9,
+                  fontSize: 11,
                   letterSpacing: "0.12em",
                   textTransform: "uppercase",
                   color: "var(--text-muted)",
                   fontFamily: "var(--font-mono)",
                 }}
               >
-                Stabilite
+                <TooltipLabel tooltip={getMetricTooltip("stability")} style={{ gap: 4 , color: "#7dd3fc"}}>
+                  Stabilite
+                </TooltipLabel>
               </span>
               <span
                 style={{
-                  fontSize: 10,
+                  fontSize: 12,
                   fontWeight: 700,
                   color: stabilityTone,
                   fontFamily: "var(--font-mono)",
@@ -1426,185 +1071,11 @@ const JourneyPipeline: FC<{
           </div>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 5,
-            padding: "7px 9px",
-            borderRadius: 10,
-            background: "rgba(15,23,42,0.26)",
-            border: "1px solid rgba(148,163,184,0.12)",
-          }}
-        >
-          <div
-            style={{
-              fontSize: 9,
-              fontWeight: 700,
-              letterSpacing: "0.12em",
-              color: "var(--text-muted)",
-              textTransform: "uppercase",
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            Pourquoi ce niveau de confiance ?
-          </div>
-          {trustHighlights.map((item) => (
-            <div
-              key={item}
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 7,
-                fontSize: 10.5,
-                lineHeight: 1.3,
-                color: "var(--text-secondary)",
-              }}
-            >
-              <span style={{ color: "#7dd3fc", fontSize: 9, marginTop: 2 }}>•</span>
-              <span>{item}</span>
-            </div>
-          ))}
-          {dominantSignal && (
-            <div
-              style={{
-                paddingTop: 2,
-                fontSize: 9.5,
-                color: "#9fb7d4",
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              Signal dominant: {dominantSignal}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{
-      background: "var(--card)",
-      border: "1px solid var(--border)",
-      borderRadius: 14,
-      padding: "16px 18px",
-      display: "flex", flexDirection: "column", gap: 14,
-      height: 340,
-      overflow: "hidden",
-    }}>
-      <div>
-        <div style={{
-          fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 600,
-          color: "var(--text-primary)",
-        }}>
-          Parcours du système
-        </div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
-          Où en est le pipeline pour le dernier passage.
-        </div>
-        {lastSignal && (
-          <div style={{
-            marginTop: 6,
-            display: "inline-flex",
-            maxWidth: "100%",
-            padding: "4px 9px",
-            borderRadius: 999,
-            border: "1px solid rgba(125,211,252,0.18)",
-            background: "rgba(125,211,252,0.08)",
-            color: "#7dd3fc",
-            fontSize: 9.5,
-            fontWeight: 700,
-            letterSpacing: "0.06em",
-            fontFamily: "var(--font-mono)",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}>
-            Dernier signal · {lastSignal}
-          </div>
-        )}
-      </div>
-
-      {/* stages */}
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4, position: "relative", minHeight: 0 }}>
-        {stages.map((s, i) => {
-          const isActive = i === activeIndex;
-          return (
-            <div key={s.key} style={{ display: "flex", alignItems: "center", flex: i === stages.length - 1 ? "0 0 auto" : 1 }}>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <div style={{
-                  width: 28, height: 28, borderRadius: "50%",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  border: `1.5px solid ${s.done ? "var(--purple)" : isActive ? "var(--amber)" : "var(--border)"}`,
-                  background: s.done ? "rgba(45,212,168,0.12)" : isActive ? "rgba(251,191,36,0.1)" : "transparent",
-                  color: s.done ? "var(--purple)" : isActive ? "var(--amber)" : "var(--text-muted)",
-                  fontSize: 12, fontWeight: 700,
-                  boxShadow: s.done ? "0 0 12px rgba(45,212,168,0.25)" : isActive ? "0 0 14px rgba(251,191,36,0.2)" : "none",
-                  transition: "all .3s ease",
-                  animation: isActive ? "pulse-dot 1.8s ease-in-out infinite" : "none",
-                }}>
-                  {s.done ? "✓" : isActive ? "…" : "○"}
-                </div>
-                <span style={{
-                  fontFamily: "var(--font-mono)", fontSize: 8.5, fontWeight: 700,
-                  letterSpacing: "0.1em", color: s.done ? "var(--text-secondary)" : isActive ? "var(--amber)" : "var(--text-muted)",
-                  whiteSpace: "nowrap",
-                }}>
-                  {s.key}
-                </span>
-              </div>
-              {i < stages.length - 1 && (
-                <div style={{
-                  flex: 1, height: 1.5, margin: "0 4px", marginBottom: 18,
-                  background: s.done && stages[i + 1].done
-                    ? "linear-gradient(90deg, var(--purple), var(--purple))"
-                    : s.done || isActive
-                    ? "linear-gradient(90deg, var(--purple), var(--amber), var(--border))"
-                    : "var(--border)",
-                  opacity: 0.7,
-                }}/>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* confidence footer */}
-      <div style={{
-        paddingTop: 10, borderTop: "1px solid var(--border-subtle)",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-      }}>
-        <div>
-          <div style={{
-            fontSize: 9, fontWeight: 700, letterSpacing: "0.14em",
-            color: "var(--text-muted)", textTransform: "uppercase",
-            fontFamily: "var(--font-mono)", marginBottom: 4,
-          }}>
-            Niveau de confiance
-          </div>
-          <div style={{
-            fontFamily: "var(--font-mono)", fontSize: 20, fontWeight: 700,
-            color: confidenceTone,
-          }}>
-            {confidence == null ? "—" : `${confidence}%`}
-          </div>
-        </div>
-        <span style={{
-          padding: "4px 10px", borderRadius: 999,
-          fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em",
-          fontFamily: "var(--font-mono)",
-          border: `1px solid ${isTrusted ? "rgba(45,212,168,0.4)" : "var(--border)"}`,
-          background: isTrusted ? "rgba(45,212,168,0.12)" : "transparent",
-          color: isTrusted ? "var(--green)" : "var(--text-muted)",
-        }}>
-          {confLabel}
-        </span>
       </div>
     </div>
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
 // Props + composant principal
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1623,10 +1094,10 @@ interface Props {
 }
 
 export const DashboardPanel: FC<Props> = ({
-  kpis, alarms, engines, decisions, logLines, trust, activities, loading, wsConnected, isLive, isFusionView,
+  kpis, alarms, engines, trust, activities, loading, isLive, isFusionView,
 }) => {
   if (loading) return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 320, flexDirection: "column", gap: 16, color: "var(--text-muted)", fontSize: 13 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 320, flexDirection: "column", gap: 16, color: "var(--text-muted)", fontSize: 15 }}>
       <div style={{ width: 32, height: 32, borderRadius: "50%", border: "2px solid var(--purple)", borderTopColor: "transparent", animation: "spin .8s linear infinite" }}/>
       Chargement des données pipeline…
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -1646,13 +1117,7 @@ export const DashboardPanel: FC<Props> = ({
         @keyframes live-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
       `}</style>
 
-      {/* ── 1. Story banner ── */}
-      <StoryBanner
-        criticalCount={criticalCount}
-        alarms={alarms}
-        engines={engines}
-        kpis={kpis}
-      />
+      
 
       {/* ── 2. KPI strip (5 essentials) ── */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -1681,6 +1146,7 @@ export const DashboardPanel: FC<Props> = ({
           label="Confiance"
           value={confidencePct != null ? `${confidencePct}%` : "—"}
           accent={confidencePct != null && confidencePct >= 80 ? "var(--green)" : confidencePct != null && confidencePct >= 60 ? "var(--amber)" : "var(--text-muted)"}
+          tooltip={getMetricTooltip("confidence")}
         />
       </div>
 
@@ -1688,59 +1154,15 @@ export const DashboardPanel: FC<Props> = ({
       <EnginePressurePanel engines={engines} alarms={alarms}/>
 
       {/* ── 4. Alerts + Journey side-by-side ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 16 }}>
-        <LiveAlarmFeed alarms={alarms} isFusionView={isFusionView}/>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <JourneyPipeline
           trust={trust}
           activities={activities}
+          isLive={isLive}
         />
+        <LiveAlarmFeed alarms={alarms} isFusionView={isFusionView}/>
       </div>
 
-      {/* ── 5. Secondary: agent flow / terminal / trust details ── */}
-      <details style={{
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 14,
-        padding: "14px 18px",
-      }}>
-        <summary style={{
-          cursor: "pointer", listStyle: "none",
-          fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 700,
-          letterSpacing: "0.1em", textTransform: "uppercase",
-          color: "var(--text-secondary)", userSelect: "none",
-        }}>
-          ▸ Détails techniques · agents, logs &amp; trust gate
-        </summary>
-        <div style={{ display: "grid", gap: 16, marginTop: 16 }}>
-          <Card
-            title="Agent Interaction Flow"
-            tag={`${activities.length} événements`}
-            style={{ maxHeight: 420, overflowY: "auto" }}
-          >
-            <AgentActivityFlow
-              activities={activities}
-              decisions={decisions}
-              wsConnected={wsConnected}
-              isLive={isLive}
-            />
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 8 }}>
-                Structured decisions snapshot
-              </div>
-              <AgentWorkflow decisions={decisions.slice(0, 4)}/>
-            </div>
-          </Card>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
-            <Card title="Terminal — Logs pipeline" tag={`${logLines.length} lignes`}>
-              <Terminal lines={logLines}/>
-            </Card>
-            <Card title="Trust Gate — Score de confiance">
-              <TrustPanel trust={trust} isFusionView={isFusionView}/>
-            </Card>
-          </div>
-        </div>
-      </details>
     </div>
   );
 };

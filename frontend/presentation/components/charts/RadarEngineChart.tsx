@@ -9,6 +9,7 @@ import {
 
 import type { RadarEngineChartProps } from "../../../shared/types/analyticsProps";
 import type { EngineScore } from "../../../shared/types/idps";
+import { getEngineTooltip } from "../../../shared/constants/dashboardTooltips";
 
 const ENGINE_COLORS: Record<string, string> = {
   SSH: "#ff5b7f",
@@ -127,6 +128,7 @@ export function RadarEngineChart({ engines, compact = false }: RadarEngineChartP
                   className={`engine-tab${active === item.engine ? " active" : ""}`}
                   style={active === item.engine ? { borderColor: itemVisual.color, color: itemVisual.color } : {}}
                   onClick={() => setActive(item.engine)}
+                  title={getEngineTooltip(item.engine)}
                 >
                   {item.engine}
                   {item.status === "ALARM" && <span style={{ marginLeft: 3, color: itemVisual.color }}>•</span>}
@@ -147,6 +149,7 @@ export function RadarEngineChart({ engines, compact = false }: RadarEngineChartP
               <button
                 key={item.engine}
                 onClick={() => setActive(item.engine)}
+                title={getEngineTooltip(item.engine)}
                 style={{
                   borderRadius: 999,
                   border: `1px solid ${isActive ? `${itemVisual.color}66` : "rgba(148,163,184,0.18)"}`,

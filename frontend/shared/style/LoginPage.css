@@ -117,25 +117,22 @@
 }
 
 .logo-ring {
-  width: 72px; height: 72px;
-  border-radius: 20px;
-  background: linear-gradient(135deg, rgba(108,92,231,0.25), rgba(0,245,255,0.12));
-  border: 1px solid rgba(108,92,231,0.4);
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #00e5ff, #7c5cff);
+  border: 1px solid rgba(255,255,255,0.25);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 20px rgba(108,92,231,0.25), inset 0 1px 0 rgba(255,255,255,0.08);
-  animation: logo-glow 3s ease-in-out infinite;
-}
-
-@keyframes logo-glow {
-  0%,100% { box-shadow: 0 0 16px rgba(108,92,231,0.25), inset 0 1px 0 rgba(255,255,255,0.08); }
-  50%      { box-shadow: 0 0 30px rgba(108,92,231,0.45), inset 0 1px 0 rgba(255,255,255,0.1); }
+  color: #0a0f1d;
+  box-shadow:
+    0 0 24px rgba(0, 229, 255, 0.45),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.25);
 }
 
 .logo-icon {
-  width: 32px; height: 32px;
-  color: #a78bfa;
+  width: 26px; height: 26px;
+  color: currentColor;
   stroke: currentColor;
 }
 
@@ -347,7 +344,7 @@
 @media (max-width: 480px) {
   .login-card { padding: 32px 22px; }
   .login-header h1 { font-size: 22px; }
-  .logo-ring { width: 60px; height: 60px; }
+  .logo-ring { width: 40px; height: 40px; }
   .logo-icon { width: 26px; height: 26px; }
 }
 

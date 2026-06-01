@@ -21,23 +21,24 @@ tache_dynamic_config = Task(
         "ALARMS: {alarmes_resumees}\n\n"
         "APPLY FIRST MATCHING RULE:\n"
         "R1: anomalies>0,spike=True,velocity>200 "
-        "→ ssh_high=25,threat=CRITICAL\n"
+        "→ ssh_high=25,web_high=45,ftp_high=45,kernel_high=40,session_high=45,threat=CRITICAL\n"
         "R2: anomalies>0,pattern=concentrated_attacker,ips<=5 "
-        "→ ssh_high=28,escalate=[{ip_principale}],threat=ELEVATED\n"
+        "→ ssh_high=28,web_high=48,ftp_high=48,kernel_high=45,session_high=48,escalate=[{ip_principale}],threat=ELEVATED\n"
         "R3: anomalies>0,health<50,spike=True "
-        "→ ssh_high=28,threat=ELEVATED\n"
+        "→ ssh_high=28,web_high=50,ftp_high=50,kernel_high=45,session_high=50,threat=ELEVATED\n"
         "R4: anomalies>0,night>0.5 "
-        "→ rerun=[session],threat=ELEVATED\n"
+        "→ session_high=45,rerun=[session],threat=ELEVATED\n"
         "R5: anomalies=0,spike=True,velocity>300 "
-        "→ ssh_high=20,threat=ELEVATED\n"
+        "→ ssh_high=20,web_high=40,ftp_high=40,kernel_high=35,session_high=40,threat=ELEVATED\n"
         "R6: else → all null,threat=NORMAL\n\n"
         'OUTPUT THIS JSON AND NOTHING ELSE:\n'
         '{"ssh_high_risk_threshold":null,"ssh_med_risk_threshold":null,'
-        '"web_high_risk_threshold":null,"ftp_high_risk_threshold":null,'
-        '"ftp_med_risk_threshold":null,"kernel_high_risk_threshold":null,'
-        '"correlation_window_min":null,"escalate_ips":[],"suppress_ips":[],'
-        '"rerun_engines":[],"threat_level":"NORMAL",'
-        '"reasoning":"one sentence","confidence":0.9}'
+        '"web_high_risk_threshold":null,"web_med_risk_threshold":null,'
+        '"ftp_high_risk_threshold":null,"ftp_med_risk_threshold":null,'
+        '"kernel_high_risk_threshold":null,"session_high_risk_threshold":null,'
+        '"session_med_risk_threshold":null,"correlation_window_min":null,'
+        '"escalate_ips":[],"suppress_ips":[],"rerun_engines":[],'
+        '"threat_level":"NORMAL","reasoning":"one sentence","confidence":0.9}'
     ),
     expected_output="JSON only. No prose before or after.",
     agent=orchestrator_agent,

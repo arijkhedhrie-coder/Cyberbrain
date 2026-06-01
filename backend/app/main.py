@@ -187,6 +187,7 @@ from app.utils.metriques import (
     compute_drift_score,
     classify_attack_profile,
 )
+from app.core import event_store
 
 # OK — app/storage/upload_s3.py
 from app.storage.upload_s3 import (
@@ -440,6 +441,53 @@ def _build_deterministic_analysis(
         line3,
         line4,
     ])
+
+
+def _health_score_from_anomalies(df_anomalies: Any) -> tuple[float, float]:
+    if not isinstance(df_anomalies, pd.DataFrame) or df_anomalies.empty:
+        return 100.0, 0.0
+
+    if "score_final" not in df_anomalies.columns:
+        return 100.0, 0.0
+
+    score_series = pd.to_numeric(df_anomalies["score_final"], errors="coerce")
+    if score_series.empty:
+        return 100.0, 0.0
+
+    max_score = score_series.max()
+    if pd.isna(max_score):
+        return 100.0, 0.0
+
+    health_score = max(0.0, min(100.0, 100.0 - (float(max_score) * 100.0)))
+    return round(health_score, 2), round(float(max_score), 4)
+
+
+def _emit_dataset_health_event(
+    *,
+    dataset_id: str,
+    health_score: float,
+    max_anomaly_score: float,
+    raw_count: int,
+    deduped_count: int,
+    noise_ratio: float,
+) -> None:
+    try:
+        event_store.append_event(
+            category="trust",
+            event_type="DATASET_HEALTH",
+            payload={
+                "health_score": health_score,
+                "dataset_id": dataset_id,
+                "max_anomaly_score": max_anomaly_score,
+                "row_count": raw_count,
+                "deduped_count": deduped_count,
+                "noise_ratio": noise_ratio,
+            },
+            dataset_id=dataset_id,
+            source="health_monitor",
+        )
+    except Exception as exc:
+        LOG.warning("[HEALTH] Could not append DATASET_HEALTH for %s: %s", dataset_id, exc)
 
 
 def _trust_gate_fail_closed(
@@ -1147,10 +1195,180 @@ def _run_dynamic_config(log: SessionLogger, agent_inputs: dict) -> DynamicConfig
 PREDICTION_HISTORY: dict[str, deque] = {}
 
 
+def _prediction_risk_level(prediction_score: int) -> str:
+    if prediction_score >= 70:
+        return "CRITICAL"
+    if prediction_score >= 40:
+        return "HIGH"
+    if prediction_score >= 20:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _prediction_confidence_label(confidence: float | None) -> str:
+    if confidence is None:
+        return ""
+    if confidence >= 0.75:
+        return "HIGH"
+    if confidence >= 0.50:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _normalize_alarm_severity(value: object) -> str:
+    sev = str(value or "").upper().strip()
+    if sev == "CRITIQUE":
+        return "CRITICAL"
+    if sev == "AVERTISSEMENT":
+        return "HIGH"
+    if sev == "AVERTISSEMENT_MOYEN":
+        return "MED"
+    return sev
+
+
+def _top_alarm_from_alarms(alarmes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not alarmes:
+        return None
+
+    severity_rank = {"CRITICAL": 4, "HIGH": 3, "MED": 2, "LOW": 1, "INFO": 0}
+
+    def _alarm_key(alarm: dict[str, Any]) -> tuple[int, float, str]:
+        severity = _normalize_alarm_severity(alarm.get("severity") or alarm.get("severite"))
+        score = float(alarm.get("score") or alarm.get("score_final") or alarm.get("weighted_risk_score") or 0.0)
+        timestamp = str(alarm.get("timestamp") or "")
+        return severity_rank.get(severity, 0), score, timestamp
+
+    ordered = [alarm for alarm in alarmes if isinstance(alarm, dict)]
+    if not ordered:
+        return None
+    ordered.sort(key=_alarm_key, reverse=True)
+    top = ordered[0]
+    ip = str(top.get("ip") or top.get("source_ip") or top.get("server_id") or "")
+    return {
+        "message": str(top.get("message") or ""),
+        "ip": ip,
+        "risk": _normalize_alarm_severity(top.get("severity") or top.get("severite") or top.get("niveau")),
+    }
+
+
+def _failure_total_for_ip(alarmes: list[dict[str, Any]], ip: str) -> int | None:
+    if not ip:
+        return None
+    total = 0
+    matched = False
+    for alarm in alarmes:
+        if not isinstance(alarm, dict):
+            continue
+        candidate_ip = str(alarm.get("ip") or alarm.get("source_ip") or alarm.get("server_id") or "")
+        if candidate_ip != ip:
+            continue
+        matched = True
+        try:
+            total += int(float(alarm.get("failures", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+    return total if matched else None
+
+
+def _model_agreement_label(value: float | None) -> str:
+    if value is None:
+        return ""
+    if value >= 0.75:
+        return "HIGH"
+    if value >= 0.50:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _current_thresholds_from_snapshots(threshold_snapshots: list[dict[str, Any]]) -> dict[str, Any]:
+    if not threshold_snapshots:
+        return {}
+    snapshot = threshold_snapshots[-1] if len(threshold_snapshots) > 1 else threshold_snapshots[0]
+    if not isinstance(snapshot, dict):
+        return {}
+    return {
+        "pass": snapshot.get("pass"),
+        "issued_by": snapshot.get("issued_by"),
+        "ssh_high": snapshot.get("ssh_high"),
+        "ssh_med": snapshot.get("ssh_med"),
+        "web_high": snapshot.get("web_high"),
+        "web_med": snapshot.get("web_med"),
+        "ftp_high": snapshot.get("ftp_high"),
+        "ftp_med": snapshot.get("ftp_med"),
+        "kernel_high": snapshot.get("kernel_high"),
+        "session_high": snapshot.get("session_high"),
+        "session_med": snapshot.get("session_med"),
+        "correlation_window_min": snapshot.get("corr_window", snapshot.get("correlation_window_min")),
+        "threat_level": snapshot.get("threat_level"),
+        "confidence": snapshot.get("confidence"),
+    }
+
+
+def _normalize_prediction_history_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    score = int(entry.get("score", entry.get("prediction_score", 0)) or 0)
+    flags = entry.get("flags", entry.get("prediction_flags", [])) or []
+    return {
+        "timestamp": str(entry.get("timestamp") or entry.get("date") or datetime.now().isoformat()),
+        "score": score,
+        "confidence": entry.get("confidence", entry.get("prediction_confidence")),
+        "flags": list(flags),
+        "risk_level": str(entry.get("risk_level", _prediction_risk_level(score))),
+        "analysis_mode": str(entry.get("analysis_mode", "")),
+        "predicted_events": list(entry.get("predicted_events", []) or []),
+        "predicted_outcomes": list(entry.get("predicted_outcomes", []) or []),
+        "message": str(entry.get("message", "")),
+        "explanations": list(entry.get("explanations", []) or []),
+        "timeline_characteristics": entry.get("timeline_characteristics", {}) if isinstance(entry.get("timeline_characteristics", {}), dict) else {},
+        "signal_summary": entry.get("signal_summary", {}) if isinstance(entry.get("signal_summary", {}), dict) else {},
+    }
+
+
+def _build_prediction_history_entry(
+    prediction: dict[str, Any],
+    signal_analysis: dict[str, Any],
+    explanations: list[str],
+) -> dict[str, Any]:
+    score = int(prediction.get("prediction_score", 0) or 0)
+    return {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "score": score,
+        "confidence": prediction.get("confidence"),
+        "flags": list(prediction.get("flags", []) or []),
+        "predicted_events": list(prediction.get("predicted_events", []) or []),
+        "predicted_outcomes": list(prediction.get("predicted_outcomes", []) or []),
+        "analysis_mode": str(prediction.get("analysis_mode", "")),
+        "risk_level": _prediction_risk_level(score),
+        "message": str(prediction.get("message", "Prevision calculee")),
+        "explanations": list(explanations or []),
+        "timeline_characteristics": prediction.get("timeline_characteristics", {})
+        if isinstance(prediction.get("timeline_characteristics", {}), dict)
+        else {},
+        "signal_summary": {
+            "ssh_failures_trend": signal_analysis.get("failures", {}).get("trend_ratio", 1.0),
+            "unique_ips_trend": signal_analysis.get("unique_ips", {}).get("trend_ratio", 1.0),
+            "username_diversity": signal_analysis.get("usernames", {}).get("last", 0),
+            "ftp_activity": signal_analysis.get("ftp_events", {}).get("last", 0),
+            "kernel_errors": signal_analysis.get("kernel_errors", {}).get("last", 0),
+        },
+    }
+
+
+def _seed_prediction_history(dataset_id: str) -> deque:
+    history = deque(maxlen=60)
+    try:
+        memory_snapshot = charger_memoire(dataset_id=dataset_id)
+        for entry in memory_snapshot.get("forecast_history", [])[-60:]:
+            if isinstance(entry, dict):
+                history.append(_normalize_prediction_history_entry(entry))
+    except Exception as e:
+        LOG.warning("[PREDICTION_HISTORY] Seed failed for %s: %s", dataset_id, e)
+    return history
+
+
 def _prediction_history(dataset_id: str) -> deque:
     history = PREDICTION_HISTORY.get(dataset_id)
     if history is None:
-        history = deque(maxlen=30)
+        history = _seed_prediction_history(dataset_id)
         PREDICTION_HISTORY[dataset_id] = history
     return history
 
@@ -1234,8 +1452,10 @@ def _build_prediction_payload(
     return {
         "available": True,
         "prediction_score": prediction_score,
+        "confidence": prediction.get("confidence"),
         "flags": flags,
         "predicted_events": list(prediction.get("predicted_events", []) or []),
+        "predicted_outcomes": list(prediction.get("predicted_outcomes", []) or []),
         "message": str(prediction.get("message", "Prevision calculee")),
         "analysis_mode": str(prediction.get("analysis_mode", "")),
         "timeline_characteristics": prediction.get("timeline_characteristics", {}),
@@ -1356,7 +1576,6 @@ def main() -> None:
                     "noise_ratio": noise_ratio,
                     "data_sources": data_sources_raw,
                 })
-                current_log.metrics_computed(metrics_summary)
 
                 df_norm: pd.DataFrame | None = None
                 try:
@@ -1401,11 +1620,12 @@ def main() -> None:
                     explanations = []
 
                 history = _prediction_history(dataset_id)
-                history.append({
-                    "timestamp": datetime.now().strftime("%H:%M:%S"),
-                    "score": prediction.get("prediction_score", 0),
-                    "flags": prediction.get("flags", []),
-                })
+                forecast_history_entry = _build_prediction_history_entry(
+                    prediction,
+                    signal_analysis,
+                    explanations,
+                )
+                history.append(forecast_history_entry)
                 prediction_payload = _build_prediction_payload(prediction, signal_analysis, explanations, history)
                 prediction_payload["dataset_id"] = dataset_id
                 current_log._emit("PREDICTION_COMPUTED", {
@@ -1453,6 +1673,9 @@ def main() -> None:
                     normalized_df=df_norm,
                     prediction_cache=prediction,
                 )
+                health_score, max_anomaly_score = _health_score_from_anomalies(anomalies)
+                metrics_summary["health_score"] = health_score
+                current_log.metrics_computed(metrics_summary)
                 current_log.pass1_complete(
                     alarmes_pass1,
                     threshold_snapshot=threshold_snapshots[0] if threshold_snapshots else None,
@@ -1532,6 +1755,16 @@ def main() -> None:
                         broadcast_alarm(al, stage="final", server_id=srv, dataset_id=dataset_id)
 
                 agent_inputs.update(_get_agent_inputs_fn(alarmes_final, anomalies))
+                health_score, max_anomaly_score = _health_score_from_anomalies(anomalies)
+                metrics_summary["health_score"] = health_score
+                _emit_dataset_health_event(
+                    dataset_id=dataset_id,
+                    health_score=health_score,
+                    max_anomaly_score=max_anomaly_score,
+                    raw_count=raw_count,
+                    deduped_count=deduped_count,
+                    noise_ratio=noise_ratio,
+                )
                 agent_inputs.update({
                     "pass2_ran": str(pass2_ran),
                     "dynamic_config_summary": (
@@ -1708,6 +1941,7 @@ def main() -> None:
                     "agent_config_summary": dynamic_config.summary(),
                     "prediction_score": prediction_payload["prediction_score"],
                     "prediction_flags": prediction_payload["flags"],
+                    "forecast_history_entry": forecast_history_entry,
                 }
                 sauvegarder_memoire(memory_payload, dataset_id=dataset_id)
                 memory_snapshot = charger_memoire(dataset_id=dataset_id)

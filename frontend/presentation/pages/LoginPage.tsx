@@ -175,10 +175,14 @@ export const LoginPage = () => {
           <div className="login-header">
             <div className="logo-wrapper">
               <div className="logo-ring">
-                <svg className="logo-icon" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                  <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                  <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                <svg className="logo-icon" viewBox="0 0 32 32" fill="none">
+                  <path
+                    d="M16 3c4 0 7 2.5 7 6 2.5.6 4 2.7 4 5.3 0 1.9-1 3.4-2.4 4.2.6.9.9 2 .9 3.2 0 3.4-2.7 6-6.2 6-1.3 0-2.5-.4-3.3-1.1-.8.7-2 1.1-3.3 1.1-3.5 0-6.2-2.6-6.2-6 0-1.2.3-2.3.9-3.2C6 17.7 5 16.2 5 14.3c0-2.6 1.5-4.7 4-5.3 0-3.5 3-6 7-6z"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                  />
+                  <circle cx="16" cy="16" r="2.4" fill="currentColor" />
+                  <path d="M10 12l3 2M22 12l-3 2M10 20l3-2M22 20l-3-2M16 8v3M16 21v3" stroke="currentColor" strokeWidth="1.2" />
                 </svg>
               </div>
             </div>
@@ -267,13 +271,6 @@ export const LoginPage = () => {
             </button>
           </form>
 
-          <div className="login-footer">
-            <div className="security-badges">
-              <span>🔐 JWT Encrypted</span>
-              <span>🛡️ XSS Protected</span>
-              <span>⚡ TLS 1.3</span>
-            </div>
-          </div>
         </div>
       </div>
     </div>

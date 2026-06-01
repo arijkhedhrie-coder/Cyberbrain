@@ -1,4 +1,4 @@
-import type { FC } from "react";
+import React, { type FC } from "react";
 import type { AgentDecision, WorkflowActivity } from "../../../shared/types/idps";
 
 type Props = {
@@ -88,7 +88,7 @@ export const AgentActivityFlow: FC<Props> = ({
 
   if (safeActivities.length === 0) {
     return (
-      <div style={{ fontSize: 11, color: "var(--muted,#6b7280)", padding: "12px 0" }}>
+      <div style={{ fontSize: 13, color: "var(--muted,#6b7280)", padding: "12px 0" }}>
         {wsConnected
           ? "Le pipeline n'a pas encore émis d'activité structurée."
           : "En attente du flux d'activité pipeline…"}
@@ -100,6 +100,12 @@ export const AgentActivityFlow: FC<Props> = ({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <style>{`
+        @keyframes flow-pulse {
+          0%, 100% { opacity: 1; transform: translateY(0); }
+          50% { opacity: .55; transform: translateY(-1px); }
+        }
+      `}</style>
       <div style={{
         padding: 12,
         borderRadius: 8,
@@ -110,18 +116,19 @@ export const AgentActivityFlow: FC<Props> = ({
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
               <span style={{
-                fontSize: 10,
+                fontSize: 12,
                 padding: "3px 8px",
                 borderRadius: 999,
                 background: isLive ? "rgba(239,68,68,0.18)" : "rgba(148,163,184,0.16)",
                 color: isLive ? "#fda4af" : "#cbd5e1",
                 fontWeight: 700,
                 letterSpacing: 0.6,
+                animation: isLive ? "flow-pulse 1.4s ease-in-out infinite" : "none",
               }}>
                 {isLive ? "LIVE FLOW" : "LAST RUN"}
               </span>
               <span style={{
-                fontSize: 10,
+                fontSize: 12,
                 padding: "3px 8px",
                 borderRadius: 999,
                 background: latestStatusStyle.bg,
@@ -132,20 +139,20 @@ export const AgentActivityFlow: FC<Props> = ({
               }}>
                 {latest?.status}
               </span>
-              <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace" }}>
+              <span style={{ fontSize: 12, color: "#94a3b8", fontFamily: "monospace" }}>
                 {latest?.timestamp}
               </span>
             </div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 3 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#e2e8f0", marginBottom: 3 }}>
               {latest?.title}
             </div>
-            <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.5 }}>
+            <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.5 }}>
               {latest?.detail}
             </div>
           </div>
 
           <div style={{ minWidth: 160, display: "grid", gap: 6 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#94a3b8" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#94a3b8" }}>
               <span>Pipeline progress</span>
               <span style={{ color: "#e2e8f0", fontWeight: 700 }}>{progress}%</span>
             </div>
@@ -163,7 +170,7 @@ export const AgentActivityFlow: FC<Props> = ({
                 transition: "width .4s ease",
               }} />
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#94a3b8" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#94a3b8" }}>
               <span>{completedStageCount}/{STAGES.length} stages seen</span>
               <span>{decisions.length} decisions</span>
             </div>
@@ -193,8 +200,8 @@ export const AgentActivityFlow: FC<Props> = ({
               textAlign: "center",
             }}
           >
-            <div style={{ fontSize: 16, fontWeight: 800, color: item.color }}>{item.value}</div>
-            <div style={{ fontSize: 9, color: "#64748b", textTransform: "uppercase", letterSpacing: 1 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: item.color }}>{item.value}</div>
+            <div style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: 1 }}>
               {item.label}
             </div>
           </div>
@@ -225,16 +232,17 @@ export const AgentActivityFlow: FC<Props> = ({
                   borderRadius: "50%",
                   background: active ? color : "#475569",
                   boxShadow: active ? `0 0 0 4px ${color}22` : "none",
+                  animation: active && isLive ? "flow-pulse 1.4s ease-in-out infinite" : "none",
                 }} />
-                <span style={{ fontSize: 10, color: active ? "#e2e8f0" : "#94a3b8", fontWeight: 700 }}>
+                <span style={{ fontSize: 12, color: active ? "#e2e8f0" : "#94a3b8", fontWeight: 700 }}>
                   {stage.label}
                 </span>
               </div>
-              <div style={{ fontSize: 10, color: active ? "#cbd5e1" : "#64748b", lineHeight: 1.4 }}>
+              <div style={{ fontSize: 12, color: active ? "#cbd5e1" : "#64748b", lineHeight: 1.4 }}>
                 {activity?.title ?? "Waiting"}
               </div>
               {typeof activity?.progress === "number" && (
-                <div style={{ fontSize: 9, color: color, marginTop: 5, fontFamily: "monospace" }}>
+                <div style={{ fontSize: 11, color: color, marginTop: 5, fontFamily: "monospace" }}>
                   {activity.progress}%
                 </div>
               )}
@@ -280,7 +288,7 @@ export const AgentActivityFlow: FC<Props> = ({
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: 10,
+                  fontSize: 12,
                   fontWeight: 800,
                 }}>
                   {activity.actor.slice(0, 2).toUpperCase()}
@@ -295,11 +303,11 @@ export const AgentActivityFlow: FC<Props> = ({
 
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0" }}>
                     {activity.title}
                   </span>
                   <span style={{
-                    fontSize: 9,
+                    fontSize: 11,
                     padding: "2px 7px",
                     borderRadius: 999,
                     background: statusStyle.bg,
@@ -310,23 +318,23 @@ export const AgentActivityFlow: FC<Props> = ({
                   }}>
                     {activity.status}
                   </span>
-                  <span style={{ fontSize: 10, color: severityColor(activity.severity), fontWeight: 700 }}>
+                  <span style={{ fontSize: 12, color: severityColor(activity.severity), fontWeight: 700 }}>
                     {activity.severity}
                   </span>
                   {typeof activity.progress === "number" && (
-                    <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace" }}>
+                    <span style={{ fontSize: 12, color: "#94a3b8", fontFamily: "monospace" }}>
                       {activity.progress}%
                     </span>
                   )}
                 </div>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 10, color: "#94a3b8", marginBottom: 4 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>
                   <span>{activity.actor}</span>
                   <span>{activity.stage}</span>
                   <span style={{ fontFamily: "monospace" }}>{activity.timestamp}</span>
                 </div>
 
-                <div style={{ fontSize: 11, color: "#cbd5e1", lineHeight: 1.55 }}>
+                <div style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.55 }}>
                   {activity.detail}
                 </div>
 
@@ -336,7 +344,7 @@ export const AgentActivityFlow: FC<Props> = ({
                       <span
                         key={`${activity.id}-${entry.key}`}
                         style={{
-                          fontSize: 9,
+                          fontSize: 11,
                           padding: "3px 7px",
                           borderRadius: 999,
                           background: "rgba(148,163,184,0.12)",

@@ -85,6 +85,16 @@ def _safe_astype_str(series: pd.Series) -> pd.Series:
     return series.fillna("").astype(str)
 
 
+def _risk_level_from_score(prediction_score: int) -> str:
+    if prediction_score >= 70:
+        return "CRITICAL"
+    if prediction_score >= 40:
+        return "HIGH"
+    if prediction_score >= 20:
+        return "MEDIUM"
+    return "LOW"
+
+
 def _extract_username_safe(content: pd.Series) -> pd.Series:
     # Lazily import to avoid unnecessary import-time coupling.
     try:
@@ -199,13 +209,72 @@ def _append_phase(flags: list[str], predicted_events: list[str], flag: str, even
 def _empty_prediction(message: str, analysis_mode: str = "insufficient_data") -> dict[str, Any]:
     return {
         "prediction_score": 0,
+        "confidence": 0.0,
         "signals": {},
         "flags": [],
         "predicted_events": [],
+        "predicted_outcomes": [],
         "analysis_mode": analysis_mode,
         "timeline_characteristics": {},
         "message": message,
     }
+
+
+def _prediction_confidence(
+    prediction_score: int,
+    flags: list[str],
+    predicted_events: list[str],
+    analysis_mode: str,
+) -> float:
+    """
+    Deterministic confidence estimate for the forecast output.
+
+    The score increases with stronger evidence, more predicted outcomes and a
+    longer temporal history. It stays at 0.0 when the engine produces no
+    actionable signal.
+    """
+    if prediction_score <= 0 and not flags and not predicted_events:
+        return 0.0
+
+    score_component = min(1.0, max(0.0, prediction_score / 100.0))
+    outcome_component = min(0.35, 0.10 * len(predicted_events) + 0.05 * len(flags))
+    mode_component = 0.08 if analysis_mode == "long_timeline_forecast" else 0.05
+
+    confidence = score_component * 0.65 + outcome_component + mode_component
+    return float(round(min(1.0, confidence), 4))
+
+
+def _predicted_outcome_description(flag: str, event: str) -> str:
+    descriptions = {
+        "BOTNET_WARMUP": "Distributed sources are starting to coordinate with low failure pressure.",
+        "SPRAY_PHASE": "Username diversity is rising while failures remain controlled.",
+        "CRASH_COMING": "Kernel instability is increasing and a crash pattern is emerging.",
+        "DATA_EXFIL_START": "Transfer activity is shifting toward download-heavy behavior.",
+    }
+    label = descriptions.get(flag, "Predictive signal detected.")
+    if event:
+        return f"{label} Outcome: {event.replace('_', ' ').lower()}."
+    return label
+
+
+def _build_predicted_outcomes(
+    flags: list[str],
+    predicted_events: list[str],
+    prediction_score: int,
+    confidence: float,
+) -> list[dict[str, Any]]:
+    outcomes: list[dict[str, Any]] = []
+    for index, flag in enumerate(flags):
+        event = predicted_events[index] if index < len(predicted_events) else ""
+        outcomes.append({
+            "flag": flag,
+            "event": event,
+            "score": prediction_score,
+            "confidence": confidence,
+            "risk_level": _risk_level_from_score(prediction_score),
+            "description": _predicted_outcome_description(flag, event),
+        })
+    return outcomes
 
 
 def _score_long_mode(signals: dict[str, dict[str, Any]], flags: list[str]) -> float:
@@ -559,12 +628,22 @@ def run_prediction_engine(df_norm: pd.DataFrame) -> dict[str, Any]:
         )
 
     prediction_score = float(min(100.0, prediction_score))
+    prediction_score_int = int(round(prediction_score))
+    confidence = _prediction_confidence(prediction_score_int, flags, predicted_events, analysis_mode)
+    predicted_outcomes = _build_predicted_outcomes(
+        flags=flags,
+        predicted_events=predicted_events,
+        prediction_score=prediction_score_int,
+        confidence=confidence,
+    )
 
     return {
-        "prediction_score": int(round(prediction_score)),
+        "prediction_score": prediction_score_int,
+        "confidence": confidence,
         "signals": signals,
         "flags": flags,
         "predicted_events": predicted_events,
+        "predicted_outcomes": predicted_outcomes,
         "analysis_mode": analysis_mode,
         "timeline_characteristics": {
             "minute_buckets": int(len(minute_index)),

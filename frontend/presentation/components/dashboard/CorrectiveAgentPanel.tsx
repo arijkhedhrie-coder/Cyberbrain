@@ -103,15 +103,17 @@ const cardStyle: CSSProperties = {
 };
 
 const headerTitle: CSSProperties = {
-  fontSize: 28,
+  fontSize: 30,
   fontWeight: 600,
   letterSpacing: "-0.02em",
   color: "#f8fafc",
 };
 
+// FIX 3 — muted text color was previously "#94a3b8" (too dark/invisible on
+// dark bg). Changed to a lighter, clearly legible secondary tone.
 const mutedText: CSSProperties = {
-  color: "#94a3b8",
-  fontSize: 12,
+  color: "#cbd5e1",
+  fontSize: 14,
 };
 
 const separatorStyle: CSSProperties = {
@@ -220,6 +222,35 @@ const matchingActivityCount = (activities: WorkflowActivity[], suggestion: Corre
     );
   }).length;
 
+// FIX 4 — Check whether the AI is actually learning.
+// The backend stores every admin decision in long_term_memory.json via
+// enregistrer_stat_action() (called from corrective_api.py on each validate).
+// "Learning" means the memory file has at least one recorded decision
+// (approved + rejected + modified > 0). We derive this from the stats the
+// backend already returns.
+const computeLearningStatus = (
+  memory: MemoryStats,
+  session: SessionStats,
+): { isLearning: boolean; label: string; color: string } => {
+  const total =
+    (memory.bonnes_actions ?? 0) +
+    (memory.faux_positifs ?? 0) +
+    (memory.corrections_apprises ?? 0);
+
+  if (memory.analysis_only) {
+    return { isLearning: false, label: "Mode lecture seule", color: "#94a3b8" };
+  }
+  if (total > 0) {
+    return { isLearning: true, label: "Apprentissage actif", color: "#4ade80" };
+  }
+  if (session.approved > 0 || session.rejected > 0 || session.modified > 0) {
+    // Decisions recorded this session but not yet flushed to long-term memory
+    return { isLearning: true, label: "Apprentissage en cours", color: "#fcd34d" };
+  }
+  return { isLearning: false, label: "En attente de décisions", color: "#94a3b8" };
+};
+
+// FIX 2 — Short, human-readable lifecycle step details.
 const buildSteps = (
   suggestion: CorrectiveSuggestion,
   activities: WorkflowActivity[],
@@ -227,30 +258,39 @@ const buildSteps = (
 ): TraceStep[] => {
   const decided = suggestion.status !== "PENDING";
   const relatedActivities = matchingActivityCount(activities, suggestion);
+  const totalDecisions =
+    (memory.bonnes_actions ?? 0) +
+    (memory.faux_positifs ?? 0) +
+    (memory.corrections_apprises ?? 0);
+
   return [
     {
       key: "detect",
-      label: "Detection",
+      label: "Détection",
       state: "done",
       timestamp: suggestion.timestamp,
-      detail: `Anomalie ${suggestion.anomaly_type} observee sur ${suggestion.ip}.`,
+      // Keep it to the essential fact — type + IP.
+      detail: `${suggestion.anomaly_type} sur ${suggestion.ip}.`,
     },
     {
       key: "suggest",
       label: "Suggestion",
       state: "done",
       timestamp: suggestion.timestamp,
-      detail: `${suggestion.action_type} proposee a ${formatPercent(suggestion.confidence)} de confiance.`,
+      // One line: what action, how confident.
+      detail: `${suggestion.action_type} — confiance ${formatPercent(suggestion.confidence)}.`,
     },
     {
       key: "review",
-      label: "Revue admin",
+      label: "Validation",
       state: decided ? "done" : "active",
-      detail: decided ? `Decision: ${statusLabel(suggestion.status)}.` : "En attente d'une decision administrateur.",
+      detail: decided
+        ? `Décision : ${statusLabel(suggestion.status)}.`
+        : "En attente de votre décision.",
     },
     {
       key: "execute",
-      label: "Execution",
+      label: "Exécution",
       state:
         suggestion.status === "APPROVED" || suggestion.status === "MODIFIED"
           ? "done"
@@ -259,18 +299,23 @@ const buildSteps = (
             : "waiting",
       detail:
         suggestion.status === "APPROVED" || suggestion.status === "MODIFIED"
-          ? `Commande executee: ${suggestion.command ?? "n/a"}`
+          ? "Action exécutée."
           : suggestion.status === "REJECTED"
-            ? "Execution annulee car la suggestion a ete rejetee."
-            : "L'execution demarre des l'approbation.",
+            ? "Annulée."
+            : "Démarrera après approbation.",
     },
     {
       key: "learn",
       label: "Apprentissage",
       state: decided ? "done" : "waiting",
+      // Show concrete learning progress if available; fall back to a simple message.
       detail: decided
-        ? `Feedback integre au moteur correctif. Traces backend reliees: ${relatedActivities}. Corrections apprises: ${memory.corrections_apprises ?? 0}.`
-        : "L'apprentissage est mis a jour apres la decision.",
+        ? totalDecisions > 0
+          ? `${totalDecisions} décision${totalDecisions > 1 ? "s" : ""} mémorisée${totalDecisions > 1 ? "s" : ""}.`
+          : relatedActivities > 0
+            ? `${relatedActivities} trace${relatedActivities > 1 ? "s" : ""} enregistrée${relatedActivities > 1 ? "s" : ""}.`
+            : "Feedback enregistré."
+        : "Mis à jour après décision.",
     },
   ];
 };
@@ -355,6 +400,12 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
       avg_confidence: avg,
     };
   }, [mergedSuggestions, pending.length, stats.session]);
+
+  // FIX 4 — compute real learning status from backend memory data
+  const learningStatus = useMemo(
+    () => computeLearningStatus(stats.memory, displayedStats),
+    [stats.memory, displayedStats],
+  );
 
   const lifecycleSource = selectedPending ?? pending[0] ?? completed[0] ?? null;
   const lifecycleSteps = useMemo(
@@ -551,26 +602,13 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                   border: "1px solid rgba(255,255,255,0.08)",
                   color: "#c7d2fe",
                   fontWeight: 700,
-                  fontSize: 16,
+                  fontSize: 18,
                   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
                 }}
               >
                 AI
-                <span
-                  style={{
-                    position: "absolute",
-                    top: -3,
-                    right: -3,
-                    width: 11,
-                    height: 11,
-                    borderRadius: "50%",
-                    background: "#10b981",
-                    boxShadow: "0 0 0 5px rgba(16,185,129,0.10)",
-                  }}
-                />
               </div>
               <div>
-                <p style={{ ...mutedText, textTransform: "uppercase", letterSpacing: "0.2em" }}>AI Operations</p>
                 <h1 style={headerTitle}>Corrective Agent</h1>
               </div>
             </div>
@@ -585,6 +623,26 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                 tone="neutral"
                 label={`Mode ${modeMeta[mode.mode].label}`}
                 prefix={<GlyphPill glyph={modeMeta[mode.mode].glyph} color={modeMeta[mode.mode].tint} />}
+              />
+              {/* FIX 4 — Learning status badge derived from real backend memory */}
+              <Badge
+                tone={learningStatus.isLearning ? "ok" : "neutral"}
+                label={learningStatus.label}
+                prefix={
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background: learningStatus.color,
+                      boxShadow: learningStatus.isLearning
+                        ? `0 0 0 4px ${learningStatus.color}22`
+                        : "none",
+                      display: "inline-block",
+                      flexShrink: 0,
+                    }}
+                  />
+                }
               />
               <button
                 type="button"
@@ -613,7 +671,7 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
               color: feedbackTone === "ok" ? "#bbf7d0" : "#fde68a",
               borderColor: feedbackTone === "ok" ? "rgba(16,185,129,0.28)" : "rgba(245,158,11,0.28)",
               background: feedbackTone === "ok" ? "rgba(16,185,129,0.10)" : "rgba(245,158,11,0.10)",
-              fontSize: 14,
+              fontSize: 16,
             }}
           >
             {feedback}
@@ -628,7 +686,7 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
               color: "#fecdd3",
               borderColor: "rgba(239,68,68,0.28)",
               background: "rgba(239,68,68,0.08)",
-              fontSize: 14,
+              fontSize: 16,
             }}
           >
             {metaError}
@@ -648,12 +706,12 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.65 }}>
+                <div style={{ color: "#94a3b8", fontSize: 15, lineHeight: 1.65 }}>
                   {loadingMeta ? "Chargement du contexte correctif..." : mode.phase_description}
                 </div>
                 <div style={{ marginTop: 16, ...separatorStyle }} />
                 <div style={{ marginTop: 16 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#94a3b8" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#94a3b8" }}>
                     <span>Seuil de confiance automatique</span>
                     <span style={{ fontFamily: "var(--font-mono)", color: "#e2e8f0" }}>
                       {formatPercent(mode.confidence_threshold)}
@@ -676,21 +734,21 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                       }}
                     />
                   </div>
-                  <div style={{ marginTop: 12, color: "#64748b", fontSize: 11, lineHeight: 1.6 }}>
-                    Memoire: {stats.memory.corrections_apprises ?? 0} corrections apprises · {stats.memory.bonnes_actions ?? 0} bonnes actions · {stats.memory.faux_positifs ?? 0} faux positifs
-                  </div>
+                  {/* FIX 1 — "Memoire: 0 corrections apprises · 0 bonnes actions · 0 faux positifs"
+                      REMOVED. The information is surfaced in a better way via the
+                      learning status badge in the header (FIX 4). Showing raw zeros
+                      when no decisions have been made yet adds noise without value. */}
                 </div>
               </CardContent>
             </Card>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
-              <KpiCard label="Total" value={String(displayedStats.total)} glyph="A" tint="#cbd5e1" />
-              <KpiCard label="En attente" value={String(displayedStats.pending)} glyph="C" tint="#fcd34d" pulse={displayedStats.pending > 0} />
-              <KpiCard label="Approuvees" value={String(displayedStats.approved)} glyph="V" tint="#86efac" />
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <KpiCard label="Total" value={String(displayedStats.total)} tint="#cbd5e1" />
+              <KpiCard label="En attente" value={String(displayedStats.pending)} tint="#fcd34d" />
+              <KpiCard label="Approuvees" value={String(displayedStats.approved)} tint="#86efac" />
               <KpiCard
                 label="Confiance moy."
                 value={formatPercent(displayedStats.avg_confidence)}
-                glyph="%"
                 tint={confidenceColor(displayedStats.avg_confidence)}
               />
             </div>
@@ -723,7 +781,7 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                           color: active ? "#e2e8f0" : "#cbd5e1",
                           borderRadius: 12,
                           padding: "10px 12px",
-                          fontSize: 12,
+                          fontSize: 14,
                           fontWeight: 700,
                           cursor: "pointer",
                         }}
@@ -736,7 +794,7 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                 </div>
 
                 <div style={{ flex: "1 1 180px", minWidth: 180 }}>
-                  <label style={{ display: "block", fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>Seuil (0 - 1)</label>
+                  <label style={{ display: "block", fontSize: 14, color: "#94a3b8", marginBottom: 6 }}>Seuil (0 - 1)</label>
                   <input
                     value={newThreshold}
                     onChange={(event) => setNewThreshold(event.target.value)}
@@ -784,6 +842,7 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                     <InlineCount>{pending.length}</InlineCount>
                   </CardTitle>
                 </div>
+                {/* FIX 3 — use the updated mutedText style so this is visible */}
                 <span style={mutedText}>Cliquez pour decider</span>
               </CardHeader>
               <div style={{ padding: "0 0 16px" }}>
@@ -828,7 +887,7 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                 {selected ? (
                   <div style={{ display: "grid", gap: 16 }}>
                     <div>
-                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "#94a3b8", marginBottom: 6 }}>
                         <span style={{ color: "#86efac" }}>{">_"}</span> Commande (modifiable)
                       </label>
                       <textarea
@@ -843,7 +902,7 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                           background: "rgba(6,78,59,0.22)",
                           color: "#a7f3d0",
                           fontFamily: "var(--font-mono)",
-                          fontSize: 12,
+                          fontSize: 14,
                           lineHeight: 1.6,
                           padding: 12,
                           opacity: selectedPending ? 1 : 0.7,
@@ -851,7 +910,7 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                       />
                     </div>
                     <div>
-                      <label style={{ display: "block", fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>
+                      <label style={{ display: "block", fontSize: 14, color: "#94a3b8", marginBottom: 6 }}>
                         Note admin (optionnel)
                       </label>
                       <input
@@ -909,7 +968,7 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                           border: "none",
                           padding: 0,
                           color: "#94a3b8",
-                          fontSize: 12,
+                          fontSize: 14,
                           textAlign: "left",
                           cursor: "pointer",
                         }}
@@ -932,7 +991,8 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                 Cycle correctif
                 {lifecycleSource && <InlineCount>{lifecycleSource.suggestion_id}</InlineCount>}
               </CardTitle>
-              <CardDescription>Suivi des etapes de detection, decision et apprentissage.</CardDescription>
+              {/* FIX 3 — CardDescription uses mutedText-level color internally; already legible */}
+              <CardDescription>Suivi des étapes de détection à l'apprentissage.</CardDescription>
             </CardHeader>
             <CardContent>
               {lifecycleSource ? (
@@ -942,7 +1002,7 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
                   ))}
                 </div>
               ) : (
-                <div style={{ color: "#94a3b8", fontSize: 14 }}>Aucun cycle a afficher.</div>
+                <div style={{ color: "#94a3b8", fontSize: 16 }}>Aucun cycle a afficher.</div>
               )}
             </CardContent>
           </Card>
@@ -968,6 +1028,7 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
             </div>
           </Card>
 
+          {/* FIX 3 — footer muted text now uses #cbd5e1 (clearly visible on dark bg) */}
           <div style={{ ...mutedText, display: "flex", gap: 18, flexWrap: "wrap" }}>
             <span>Sources live: {alarms[0]?.source_ip ?? "--"}</span>
             <span>Traces correctives: {correctiveActivities.length}</span>
@@ -1009,11 +1070,13 @@ const CardHeader: FC<{ children: ReactNode; compact?: boolean; row?: boolean }> 
 );
 
 const CardTitle: FC<{ children: ReactNode }> = ({ children }) => (
-  <div style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 600 }}>{children}</div>
+  <div style={{ color: "#e2e8f0", fontSize: 16, fontWeight: 600 }}>{children}</div>
 );
 
+// FIX 3 — CardDescription color brightened from #94a3b8 to #a8bdd1 so it
+// reads clearly against the dark card background without competing with titles.
 const CardDescription: FC<{ children: ReactNode }> = ({ children }) => (
-  <div style={{ color: "#94a3b8", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>{children}</div>
+  <div style={{ color: "#a8bdd1", fontSize: 13, textTransform: "uppercase", letterSpacing: "0.08em" }}>{children}</div>
 );
 
 const CardContent: FC<{ children: ReactNode }> = ({ children }) => <div style={{ padding: "0 20px 20px" }}>{children}</div>;
@@ -1029,7 +1092,7 @@ const InlineCount: FC<{ children: ReactNode }> = ({ children }) => (
       border: "1px solid rgba(51,65,85,0.92)",
       background: "rgba(15,23,42,0.62)",
       color: "#cbd5e1",
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 600,
     }}
   >
@@ -1051,7 +1114,7 @@ const Badge: FC<{ label: string; prefix?: ReactNode; tone: "ok" | "warn" | "neut
         border: `1px solid ${border}`,
         background: "rgba(15,23,42,0.62)",
         color,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 600,
       }}
     >
@@ -1082,7 +1145,7 @@ const GlyphPill: FC<{ glyph: string; color: string }> = ({ glyph, color }) => (
       borderRadius: "50%",
       display: "inline-grid",
       placeItems: "center",
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: 700,
       background: "rgba(15,23,42,0.72)",
       border: "1px solid rgba(51,65,85,0.92)",
@@ -1097,32 +1160,17 @@ const GlyphPill: FC<{ glyph: string; color: string }> = ({ glyph, color }) => (
 const KpiCard: FC<{
   label: string;
   value: string | number;
-  glyph: string;
   tint: string;
-  pulse?: boolean;
-}> = ({ label, value, glyph, tint, pulse }) => (
+}> = ({ label, value, tint }) => (
   <Card>
-    <div style={{ padding: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-      <div>
-        <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.12em", color: "#64748b" }}>
+    <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 16, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.12em", color: "#7dd3fc" }}>
           {label}
         </div>
-        <div style={{ marginTop: 8, fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", color: tint }}>{value}</div>
       </div>
-      <div
-        style={{
-          width: 38,
-          height: 38,
-          borderRadius: 12,
-          display: "grid",
-          placeItems: "center",
-          background: "rgba(30,41,59,0.75)",
-          color: tint,
-          fontWeight: 700,
-          boxShadow: pulse ? `0 0 0 6px ${tint}15` : "none",
-        }}
-      >
-        {glyph}
+      <div style={{ fontSize: 30, fontWeight: 600, letterSpacing: "-0.02em", color: tint, lineHeight: 1, textAlign: "right" }}>
+        {value}
       </div>
     </div>
   </Card>
@@ -1195,10 +1243,10 @@ const SuggestionRow: FC<{
           padding: "10px 8px",
         }}
       >
-        <span style={{ fontSize: 22, fontWeight: 600, color: confidenceColor(suggestion.confidence) }}>
+        <span style={{ fontSize: 24, fontWeight: 600, color: confidenceColor(suggestion.confidence) }}>
           {formatPercent(suggestion.confidence)}
         </span>
-        <span style={{ fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "#64748b" }}>Conf.</span>
+        <span style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "#64748b" }}>Conf.</span>
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1213,17 +1261,17 @@ const SuggestionRow: FC<{
               border: `1px solid ${sev.border}`,
               background: sev.background,
               color: sev.color,
-              fontSize: 10,
+              fontSize: 12,
               fontWeight: 700,
             }}
           >
             !
             {normalizeSeverity(suggestion.severity)}
           </span>
-          <span style={{ fontSize: 14, fontWeight: 600, color: "#f8fafc" }}>{suggestion.action_type}</span>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#64748b" }}>{suggestion.ip}</span>
+          <span style={{ fontSize: 16, fontWeight: 600, color: "#f8fafc" }}>{suggestion.action_type}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 14, color: "#64748b" }}>{suggestion.ip}</span>
         </div>
-        <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: "#94a3b8" }}>{suggestion.description}</div>
+        <div style={{ marginTop: 6, fontSize: 14, lineHeight: 1.6, color: "#94a3b8" }}>{suggestion.description}</div>
         {suggestion.command && (
           <div
             title={suggestion.command}
@@ -1238,7 +1286,7 @@ const SuggestionRow: FC<{
               background: "rgba(6,78,59,0.22)",
               padding: "7px 10px",
               fontFamily: "var(--font-mono)",
-              fontSize: 11,
+              fontSize: 13,
               color: "#6ee7b7",
             }}
           >
@@ -1248,7 +1296,7 @@ const SuggestionRow: FC<{
         )}
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "space-between", fontSize: 11, color: "#64748b" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "space-between", fontSize: 13, color: "#64748b" }}>
         <span>{formatClock(suggestion.timestamp)}</span>
         <span style={{ color: active ? "#a5b4fc" : "#475569" }}>{">"}</span>
       </div>
@@ -1256,6 +1304,9 @@ const SuggestionRow: FC<{
   );
 };
 
+// FIX 2 — LifecycleStep: detail text is now short, plain French (set in buildSteps).
+// The "Etape N" label above the step title was also removed — it was redundant
+// since the visual connector already conveys ordering.
 const LifecycleStep: FC<{ step: TraceStep; index: number; total: number }> = ({ step, index, total }) => {
   const tone =
     step.state === "done"
@@ -1280,7 +1331,7 @@ const LifecycleStep: FC<{ step: TraceStep; index: number; total: number }> = ({ 
           }}
         />
       )}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <div
           style={{
             position: "relative",
@@ -1300,12 +1351,7 @@ const LifecycleStep: FC<{ step: TraceStep; index: number; total: number }> = ({ 
           {tone.glyph}
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: "#64748b" }}>
-            Etape {index + 1}
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#f8fafc" }}>{step.label}</div>
-          <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.6, color: "#94a3b8" }}>{step.detail}</div>
-          <div style={{ marginTop: 4, fontSize: 10, color: "#64748b", fontFamily: "var(--font-mono)" }}>{formatClock(step.timestamp)}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: "#f8fafc" }}>{step.label}</div>
         </div>
       </div>
     </div>
@@ -1341,7 +1387,7 @@ const HistoryRow: FC<{ suggestion: CorrectiveSuggestion }> = ({ suggestion }) =>
         {suggestion.status === "APPROVED" ? "V" : suggestion.status === "REJECTED" ? "X" : suggestion.status === "MODIFIED" ? "~" : "C"}
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, fontSize: 14 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, fontSize: 16 }}>
           <span style={{ fontWeight: 600, color: "#f8fafc" }}>{suggestion.action_type}</span>
           <span
             style={{
@@ -1352,19 +1398,19 @@ const HistoryRow: FC<{ suggestion: CorrectiveSuggestion }> = ({ suggestion }) =>
               border: `1px solid ${tone.border}`,
               background: tone.background,
               color: tone.color,
-              fontSize: 10,
+              fontSize: 12,
               fontWeight: 700,
             }}
           >
             {statusLabel(suggestion.status)}
           </span>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#64748b" }}>{suggestion.ip}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 14, color: "#64748b" }}>{suggestion.ip}</span>
         </div>
-        <div style={{ marginTop: 4, fontSize: 12, color: "#94a3b8", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <div style={{ marginTop: 4, fontSize: 14, color: "#94a3b8", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {suggestion.description}
         </div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", fontSize: 12 }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", fontSize: 14 }}>
         <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, color: confidenceColor(suggestion.confidence) }}>
           {formatPercent(suggestion.confidence)}
         </span>
@@ -1403,8 +1449,8 @@ const EmptyState: FC<{ title: string; hint: string }> = ({ title, hint }) => (
     >
       O
     </div>
-    <div style={{ fontSize: 14, fontWeight: 600, color: "#e2e8f0" }}>{title}</div>
-    <div style={{ maxWidth: 320, fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>{hint}</div>
+    <div style={{ fontSize: 16, fontWeight: 600, color: "#e2e8f0" }}>{title}</div>
+    <div style={{ maxWidth: 320, fontSize: 14, color: "#64748b", lineHeight: 1.6 }}>{hint}</div>
   </div>
 );
 
