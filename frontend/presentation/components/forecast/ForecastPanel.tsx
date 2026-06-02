@@ -477,139 +477,6 @@ const getEnhancedEventDescription = (
   return `Une activité anormale devrait se poursuivre. ${ipPhrase ? ipPhrase + ". " : ""}Une surveillance active est recommandée pour détecter rapidement tout changement.`;
 };
 
-/* =========================================================================
-   ===== CONTEXTUAL GUIDANCE (plain French actions) =======================
-   ========================================================================= */
-const buildContextualGuidanceItems = (
-  flags: string[],
-  predictedEvents: string[],
-  score: number,
-  riskLevel: string,
-  rawSuggestions: string[],
-): string[] => {
-  const actions: string[] = [];
-  const used = new Set<string>();
-
-  const add = (action: string) => {
-    const key = action.slice(0, 40).toLowerCase();
-    if (!used.has(key)) {
-      used.add(key);
-      actions.push(action);
-    }
-  };
-
-  const normalized = (s: string) => s.trim().toUpperCase();
-  const hasEvent = (e: string) => predictedEvents.map(normalized).includes(e);
-  const hasFlag = (f: string) => flags.map(normalized).includes(f);
-  const isCritical = score >= 75 || riskLevel === "CRITICAL";
-  const isHigh = score >= 50 || riskLevel === "HIGH";
-
-  // ── Niveau critique : intervention immédiate ─────────────────────────────
-  if (isCritical) {
-    add("Contactez immédiatement votre administrateur système ou votre équipe informatique. Le niveau de risque actuel nécessite une intervention rapide pour bloquer les connexions suspectes.");
-  }
-
-  // ── Activité coordonnée depuis plusieurs sources ─────────────────────────
-  if (hasFlag("BOTNET_WARMUP")) {
-    add("Demandez à votre administrateur de vérifier d'où viennent les connexions suspectes. Si elles proviennent d'un pays ou d'une région inhabituelle, un blocage temporaire peut stopper l'activité rapidement.");
-    add("Réduisez temporairement le nombre de connexions simultanées autorisées sur le serveur pour freiner les tentatives coordonnées depuis plusieurs sources.");
-  }
-
-  // ── Attaque sur plusieurs comptes ────────────────────────────────────────
-  if (hasFlag("SPRAY_PHASE")) {
-    add("Vérifiez que les comptes inutilisés sont bien désactivés, et changez les mots de passe des comptes exposés dès que possible — les comptes de service sont souvent les premières cibles.");
-    add("Activez une règle qui bloque automatiquement un compte après plusieurs tentatives de connexion échouées. Cela ralentit considérablement ce type d'attaque.");
-  }
-
-  // ── Risque de sortie de données ──────────────────────────────────────────
-  if (hasFlag("DATA_EXFIL_START") || hasEvent("DATA_THEFT_IN_PROGRESS")) {
-    add("Vérifiez les transferts de fichiers récents et signalez toute copie non autorisée à votre équipe informatique. Limitez temporairement les transferts depuis l'extérieur le temps d'y voir plus clair.");
-    add("Restreignez l'accès aux transferts de fichiers aux seules adresses connues et faites vérifier les droits d'accès aux répertoires sensibles.");
-  }
-
-  // ── Tentatives de connexion SSH en série ─────────────────────────────────
-  if (hasEvent("BRUTE_FORCE_INCOMING")) {
-    if (!hasFlag("BOTNET_WARMUP")) {
-      add("Demandez à votre administrateur de changer le port de connexion SSH pour un port non standard. Cette simple modification réduit immédiatement la grande majorité des tentatives automatisées.");
-    }
-    add("Désactivez la connexion par mot de passe sur SSH et exigez une clé d'accès personnelle. Cela empêche toute tentative de deviner les mots de passe, quelle qu'en soit la fréquence.");
-  }
-
-  // ── Risque de surcharge serveur ──────────────────────────────────────────
-  if (hasFlag("CRASH_COMING") || hasEvent("SYSTEM_FAILURE_IMMINENT")) {
-    add("Vérifiez l'état du serveur maintenant : mémoire disponible, espace disque et messages d'erreur récents. Une saturation peut précipiter une coupure de service dans ce contexte.");
-    add("Préparez une procédure de redémarrage propre des services non critiques pour libérer des ressources rapidement si la situation se dégrade.");
-  }
-
-  // ── Attaque depuis plusieurs sources ─────────────────────────────────────
-  if (hasEvent("DISTRIBUTED_ATTACK_IMMINENT")) {
-    add("Limitez le nombre de requêtes acceptées depuis une même adresse IP sur une courte période. Votre administrateur peut configurer cette protection en quelques minutes.");
-  }
-
-  // ── SSH dominant ─────────────────────────────────────────────────────────
-  if (hasFlag("DOMINANT_SSH")) {
-    if (!hasEvent("BRUTE_FORCE_INCOMING") && !isCritical) {
-      add("Consultez les journaux de connexion SSH pour identifier les adresses IP les plus actives et établir une liste de blocage ciblée avant que l'activité ne s'aggrave.");
-    }
-    if (isHigh) {
-      add("Limitez l'accès SSH aux seules adresses IP autorisées. Cela bloque directement les tentatives provenant de sources non reconnues.");
-    }
-  }
-
-  // ── Web dominant ─────────────────────────────────────────────────────────
-  if (hasFlag("DOMINANT_WEB")) {
-    add("Vérifiez les journaux du serveur web pour identifier les pages ou fonctions les plus ciblées. Un blocage ciblé peut suffire à stopper l'activité suspecte.");
-    if (isHigh) {
-      add("Si votre hébergeur propose un pare-feu applicatif, activez-le. Il peut bloquer automatiquement les tentatives d'intrusion sur votre site ou votre application.");
-    }
-  }
-
-  // ── FTP dominant ─────────────────────────────────────────────────────────
-  if (hasFlag("DOMINANT_FTP")) {
-    add("Vérifiez les répertoires accessibles en transfert de fichiers et leurs droits d'accès. Limitez l'accès en lecture aux seuls dossiers nécessaires.");
-  }
-
-  // ── Instabilité système ──────────────────────────────────────────────────
-  if (hasFlag("DOMINANT_KERNEL")) {
-    add("Consultez les messages d'erreur récents du serveur pour en comprendre la source. Votre administrateur peut identifier rapidement si c'est lié à la charge réseau actuelle.");
-  }
-
-  // ── Anomalies multiples simultanées ─────────────────────────────────────
-  if (hasFlag("DOMINANT_CORRELATION")) {
-    add("Plusieurs types d'anomalies ont été détectés simultanément. Demandez à votre équipe de consulter l'ensemble des journaux pour trouver un éventuel lien entre les incidents.");
-  }
-
-  // ── Changement de sensibilité ────────────────────────────────────────────
-  if (hasFlag("THRESHOLD_SHIFT")) {
-    add("La sensibilité de détection a changé. Revérifiez vos règles d'alerte pour éviter une surcharge de notifications et assurez-vous que les alertes importantes restent visibles.");
-  }
-
-  // ── Niveau élevé sans action spécifique ──────────────────────────────────
-  if (isHigh && !isCritical && actions.length < 2) {
-    add("Vérifiez les connexions actives sur le serveur et signalez toute session ouverte depuis une adresse non reconnue. Elle doit être interrompue et analysée immédiatement.");
-  }
-
-  // ── Analyses convergentes ────────────────────────────────────────────────
-  if ((hasFlag("MODEL_AGREEMENT_HIGH") || hasFlag("HIGH_TRUST")) && actions.length < 3) {
-    add("Les outils d'analyse sont unanimes sur ce risque. Ne différez pas les mesures préventives en attendant de nouveaux signaux — c'est le bon moment d'agir.");
-  }
-
-  // ── Complément générique si besoin ───────────────────────────────────────
-  const GENERIC_FALLBACKS = [
-    "Notez les adresses IP et les horaires des anomalies détectées dans un rapport pour faciliter l'analyse et améliorer la protection future.",
-    "Vérifiez que les sauvegardes récentes sont intactes et accessibles en dehors du serveur, au cas où une intervention d'urgence serait nécessaire.",
-    "Informez votre équipe informatique des anomalies détectées et demandez une surveillance renforcée. Une deuxième lecture des journaux peut révéler des détails importants.",
-    "Contrôlez les tâches planifiées sur le serveur pour détecter tout script qui aurait été ajouté sans autorisation.",
-    "Vérifiez l'intégrité des fichiers système essentiels pour détecter toute modification non autorisée depuis la dernière vérification.",
-  ];
-
-  for (const fallback of GENERIC_FALLBACKS) {
-    if (actions.length >= 3) break;
-    add(fallback);
-  }
-
-  return actions.slice(0, 3);
-};
 
 const resolveSignal = (sa: SignalAnalysis | undefined, key: SignalKey): SignalMetric => sa?.[key] ?? {};
 
@@ -733,6 +600,33 @@ const buildConcernSignals = (sa: SignalAnalysis | undefined, flags: string[], fo
       intensity: Math.max(0.15, Math.min(1, weight / 100 || 0.2)),
     };
   });
+};
+
+const describeConcernSignalValue = (signal: ConcernSignal): string => {
+  const plural = signal.last > 1 ? "s" : "";
+
+  if (signal.key.startsWith("evidence-")) {
+    return `${signal.last}/100`;
+  }
+
+  if (signal.title.includes("surveillé")) {
+    return `${signal.last} alerte${plural}`;
+  }
+
+  switch (signal.styleKey) {
+    case "unique_ips":
+      return `${signal.last} IP distincte${plural}`;
+    case "usernames":
+      return `${signal.last} compte${plural} ciblé${plural}`;
+    case "failures":
+      return `${signal.last} échec${plural} de connexion`;
+    case "ftp_events":
+      return `${signal.last} transfert${plural} FTP`;
+    case "kernel_errors":
+      return `${signal.last} erreur${plural} système`;
+    default:
+      return String(signal.last);
+  }
 };
 
 const buildScenarioNarrative = (
@@ -926,8 +820,8 @@ const C = {
   border: "rgba(120,140,200,0.14)",
   borderStrong: "rgba(120,140,200,0.28)",
   text: "#eef0fa",
-  sub: "#9aa3bd",
-  dim: "#6b7392",
+  sub: "#ffffff",
+  dim: "#ffffff",
   cyan: "#22d3ee",
   purple: "#a78bfa",
   green: "#34d399",
@@ -971,7 +865,7 @@ function SectionHeader({ kicker, title, subtitle }: { kicker?: string; title: st
       {kicker && (
         <div
           style={{
-            fontSize: 13,
+            fontSize: 16,
             letterSpacing: "0.22em",
             textTransform: "uppercase",
             color: C.cyan,
@@ -984,7 +878,7 @@ function SectionHeader({ kicker, title, subtitle }: { kicker?: string; title: st
       )}
       <h2 style={{ fontSize: 26, fontWeight: 700, color: C.text, margin: 0, letterSpacing: "-0.01em" }}>{title}</h2>
       {subtitle && (
-        <p style={{ marginTop: 10, color: C.sub, fontSize: 16, maxWidth: 640, marginInline: "auto", lineHeight: 1.55 }}>
+        <p style={{ marginTop: 10, color: C.sub, fontSize: 19, maxWidth: 640, marginInline: "auto", lineHeight: 1.55 }}>
           {subtitle}
         </p>
       )}
@@ -1022,11 +916,11 @@ function StatCard({
     >
       <div
         style={{
-          fontSize: 12,
-          letterSpacing: "0.2em",
+          fontSize: 18,
+          letterSpacing: "0.18em",
           textTransform: "uppercase",
-          color: C.dim,
-          fontWeight: 600,
+          color: "#7dd3fc",
+          fontWeight: 700,
         }}
       >
         {label}
@@ -1043,7 +937,7 @@ function StatCard({
       >
         {value}
       </div>
-      {hint && <div style={{ marginTop: 10, fontSize: 13, color: C.sub }}>{hint}</div>}
+      {hint && <div style={{ marginTop: 10, fontSize: 16, color: C.sub }}>{hint}</div>}
       <div
         className="fp-shimmer"
         style={{ position: "absolute", inset: 0, pointerEvents: "none", opacity: 0.4 }}
@@ -1053,7 +947,7 @@ function StatCard({
 }
 
 function Sparkline({ data, width = 220, height = 44, color = C.cyan }: { data: number[]; width?: number; height?: number; color?: string }) {
-  if (!data.length) return <span style={{ color: C.dim, fontSize: 14 }}>Pas encore de tendance</span>;
+  if (!data.length) return <span style={{ color: C.dim, fontSize: 17 }}>Pas encore de tendance</span>;
   if (data.length === 1)
     return (
       <svg width={width} height={height}>
@@ -1236,13 +1130,6 @@ export const ForecastPanel = ({ dataset = "", trust = null, topAlarm = null }: P
     concernSignals,   // ← pass the highest‑intensity signals
   );
 
-  const contextualActions = buildContextualGuidanceItems(
-    effectiveFlags,
-    effectivePredictedEvents,
-    displayedPredictionScore,
-    displayedRiskLevel,
-    effectiveSuggestions,
-  );
 
   const momentumLabel =
     momentum.label === "ACCELERATING"
@@ -1261,7 +1148,6 @@ export const ForecastPanel = ({ dataset = "", trust = null, topAlarm = null }: P
       <SectionHeader
         kicker={`Source · ${datasetLabel}`}
         title="Prévision"
-        subtitle="Résumé simple."
       />
 
       {/* ============== SECTION 1 — 3 CARTES (histoire en 3 secondes) ============== */}
@@ -1275,7 +1161,7 @@ export const ForecastPanel = ({ dataset = "", trust = null, topAlarm = null }: P
       >
         <StatCard
           label="Niveau de Risque"
-          value={displayedPredictionScore}
+          value={`${Math.round(displayedPredictionScore)}/100`}
           color={threat.color}
           hint={threat.level}
           delay={0}
@@ -1301,7 +1187,6 @@ export const ForecastPanel = ({ dataset = "", trust = null, topAlarm = null }: P
         <SectionHeader
           kicker="Diagnostic"
           title="Pourquoi"
-          subtitle="Signaux qui montent."
         />
         {concernSignals.length === 0 ? (
           <div
@@ -1351,7 +1236,7 @@ export const ForecastPanel = ({ dataset = "", trust = null, topAlarm = null }: P
                     alignItems: "center",
                     justifyContent: "center",
                     fontWeight: 700,
-                    fontSize: 14,
+                    fontSize: 17,
                     letterSpacing: "0.05em",
                   }}
                 >
@@ -1362,7 +1247,7 @@ export const ForecastPanel = ({ dataset = "", trust = null, topAlarm = null }: P
                     <strong style={{ color: C.text, fontSize: 16 }}>{s.title}</strong>
                     <span
                       style={{
-                        fontSize: 12,
+                        fontSize: 18,
                         letterSpacing: "0.16em",
                         padding: "2px 8px",
                         borderRadius: 999,
@@ -1375,7 +1260,7 @@ export const ForecastPanel = ({ dataset = "", trust = null, topAlarm = null }: P
                       {s.tone}
                     </span>
                   </div>
-                  <div style={{ color: C.sub, fontSize: 14.5, lineHeight: 1.5, marginBottom: 10 }}>{s.narrative}</div>
+                  <div style={{ color: C.sub, fontSize: 17.5, lineHeight: 1.5, marginBottom: 10 }}>{s.narrative}</div>
                   <div style={{ position: "relative", height: 6, background: "rgba(255,255,255,0.04)", borderRadius: 999, overflow: "hidden" }}>
                     <div
                       className="fp-bar-fill"
@@ -1391,8 +1276,8 @@ export const ForecastPanel = ({ dataset = "", trust = null, topAlarm = null }: P
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <div style={{ fontSize: 24, fontWeight: 700, color: s.color, lineHeight: 1 }}>{s.deltaLabel}</div>
-                  <div style={{ fontSize: 12, color: C.dim, marginTop: 4, letterSpacing: "0.1em" }}>
-                    NIVEAU {s.last}
+                  <div style={{ fontSize: 18, color: C.dim, marginTop: 4, letterSpacing: "0.1em" }}>
+                    {describeConcernSignalValue(s)}
                   </div>
                 </div>
               </div>
@@ -1440,12 +1325,12 @@ export const ForecastPanel = ({ dataset = "", trust = null, topAlarm = null }: P
                   }}
                 />
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      letterSpacing: "0.18em",
-                      fontWeight: 700,
-                      color: card.riskColor,
+                    <span
+                      style={{
+                      fontSize: 18,
+                        letterSpacing: "0.18em",
+                        fontWeight: 700,
+                        color: card.riskColor,
                       padding: "4px 10px",
                       borderRadius: 999,
                       background: `${card.riskColor}14`,
@@ -1454,19 +1339,19 @@ export const ForecastPanel = ({ dataset = "", trust = null, topAlarm = null }: P
                   >
                     {card.riskLabel}
                   </span>
-                  <span style={{ fontSize: 13, color: C.dim, letterSpacing: "0.1em" }}>{card.horizon}</span>
+                  <span style={{ fontSize: 16, color: C.dim, letterSpacing: "0.1em" }}>{card.horizon}</span>
                 </div>
                 <div style={{ fontSize: 17, fontWeight: 700, color: C.text, marginBottom: 10, letterSpacing: "0.01em" }}>
                   {card.title}
                 </div>
-                <p style={{ color: C.sub, fontSize: 15, lineHeight: 1.65, margin: "0 0 18px" }}>{card.summary}</p>
+                <p style={{ color: C.sub, fontSize: 18, lineHeight: 1.65, margin: "0 0 18px" }}>{card.summary}</p>
                 <div
                   style={{
                     paddingTop: 14,
                     borderTop: `1px solid ${C.border}`,
                     display: "flex",
                     justifyContent: "space-between",
-                    fontSize: 13,
+                    fontSize: 16,
                     color: C.dim,
                   }}
                 >
@@ -1479,63 +1364,7 @@ export const ForecastPanel = ({ dataset = "", trust = null, topAlarm = null }: P
         </section>
       )}
 
-      {/* ============== SECTION 4 — GUIDANCE (actions) ============== */}
-      <section style={{ marginBottom: 24 }} className="fp-fade-up">
-        <SectionHeader
-          title="À faire"
-          subtitle="Actions ciblées selon les anomalies détectées."
-        />
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-            gap: 16,
-          }}
-        >
-          {contextualActions.map((item, idx) => (
-            <div
-              key={`action-${idx}`}
-              className="fp-card fp-fade-up"
-              style={{
-                position: "relative",
-                background: C.panel,
-                border: `1px solid ${C.border}`,
-                borderRadius: 16,
-                padding: "22px 22px 22px 64px",
-                color: C.text,
-                fontSize: 15,
-                lineHeight: 1.65,
-                animationDelay: `${idx * 90}ms`,
-              }}
-            >
-              <div
-                style={{
-                  position: "absolute",
-                  left: 18,
-                  top: 20,
-                  width: 32,
-                  height: 32,
-                  borderRadius: "50%",
-                  background: `linear-gradient(135deg, ${C.cyan}, ${C.purple})`,
-                  color: "#0b0f1e",
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 16,
-                }}
-              >
-                {idx + 1}
-              </div>
-              {item}
-            </div>
-          ))}
-        </div>
-      </section>
 
-      <div style={{ textAlign: "center", fontSize: 13, color: C.dim, letterSpacing: "0.12em", marginTop: 12 }}>
-        MISE À JOUR AUTOMATIQUE · ANALYSE LOCALE · {datasetLabel.toUpperCase()}
-      </div>
     </div>
   );
 };

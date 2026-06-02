@@ -111,6 +111,8 @@ const metricTileStyle: CSSProperties = {
   background: "linear-gradient(180deg, rgba(15,23,42,0.74), rgba(15,23,42,0.4))",
 };
 
+const panelText = "#ffffff";
+
 export default function MinimizationChart({
   dataset = "",
   embedded = false,
@@ -188,8 +190,8 @@ export default function MinimizationChart({
       {!embedded && (
         <div className="chart-header" style={{ alignItems: "flex-start", marginBottom: 18 }}>
           <div style={{ display: "grid", gap: 6 }}>
-            <span className="chart-title">Evolution du risque</span>
-            <span style={{ fontSize: 14, color: "#8ba5c0", lineHeight: 1.5 }}>
+            <span className="chart-title" style={{ fontSize: 20, color: panelText }}>Evolution du risque</span>
+            <span style={{ fontSize: 17, color: panelText, lineHeight: 1.5 }}>
               Chaque point represente un passage enregistre, avec ses alertes et son risque restant.
             </span>
           </div>
@@ -284,15 +286,15 @@ export default function MinimizationChart({
             { label: "Risque le plus bas", value: `${lowestRisk}%`, tone: "#7dd3fc" },
           ].map((item) => (
             <div key={item.label} style={metricTileStyle}>
-              <div style={{ fontSize: 13, color: "#7c8fa1", marginBottom: 8 }}>{item.label}</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: item.tone }}>{item.value}</div>
+              <div style={{ fontSize: 16, color: panelText, marginBottom: 8 }}>{item.label}</div>
+              <div style={{ fontSize: 27, fontWeight: 700, color: item.tone }}>{item.value}</div>
             </div>
           ))}
         </div>
       )}
 
       {loading ? (
-        <div className="chart-empty">Chargement de l'historique...</div>
+        <div className="chart-empty" style={{ color: panelText, fontSize: 15 }}>Chargement de l'historique...</div>
       ) : series.length === 0 ? (
         <div
           className="chart-empty"
@@ -303,6 +305,8 @@ export default function MinimizationChart({
             justifyContent: "center",
             textAlign: "center",
             padding: 20,
+            color: panelText,
+            fontSize: 15,
           }}
         >
           {error ?? "Aucune donnee live disponible pour la minimisation du risque."}
@@ -323,13 +327,13 @@ export default function MinimizationChart({
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.08)" />
             <XAxis
               dataKey="timestamp"
-              tick={{ fill: "#64748b", fontSize: 13 }}
+              tick={{ fill: panelText, fontSize: 16 }}
               axisLine={{ stroke: "rgba(148,163,184,0.12)" }}
               tickLine={false}
               interval="preserveStartEnd"
             />
             <YAxis
-              tick={{ fill: "#64748b", fontSize: 13 }}
+              tick={{ fill: panelText, fontSize: 16 }}
               axisLine={{ stroke: "rgba(148,163,184,0.12)" }}
               tickLine={false}
               allowDecimals={false}
@@ -338,9 +342,9 @@ export default function MinimizationChart({
             <Legend
               verticalAlign="top"
               align="right"
-              wrapperStyle={{ fontSize: 13, paddingBottom: 8 }}
+              wrapperStyle={{ fontSize: 16, paddingBottom: 8 }}
               formatter={(value) => (
-                <span style={{ color: "#94a3b8" }}>
+                <span style={{ color: panelText }}>
                   {value === "alarmes" ? "Alertes finales" : "Risque restant"}
                 </span>
               )}
@@ -349,7 +353,7 @@ export default function MinimizationChart({
               y={10}
               stroke="#fbbf24"
               strokeDasharray="4 4"
-              label={{ value: "Seuil critique", fill: "#fbbf24", fontSize: 12, position: "right" }}
+              label={{ value: "Seuil critique", fill: panelText, fontSize: 15, position: "right" }}
             />
             <Area
               type="monotone"
@@ -387,9 +391,9 @@ export default function MinimizationChart({
             flexWrap: "wrap",
           }}
         >
-          {showFooterNotes && <span className="stat-mini">Courbe corail = alertes finales par passage</span>}
-          {showFooterNotes && <span className="stat-mini">Courbe verte = risque restant apres traitement</span>}
-          {error && <span className="stat-mini" style={{ color: "#94a3b8" }}>{error}</span>}
+          {showFooterNotes && <span className="stat-mini" style={{ fontSize: 15, color: panelText }}>Courbe corail = alertes finales par passage</span>}
+          {showFooterNotes && <span className="stat-mini" style={{ fontSize: 15, color: panelText }}>Courbe verte = risque restant apres traitement</span>}
+          {error && <span className="stat-mini" style={{ fontSize: 15, color: panelText }}>{error}</span>}
         </div>
       )}
     </div>

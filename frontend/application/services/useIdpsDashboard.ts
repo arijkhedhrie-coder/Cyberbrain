@@ -646,13 +646,22 @@ export const useIdpsDashboard = (selectedDataset = ""): IdpsDashboardState => {
         try {
           const data = JSON.parse(event.data as string) as WsIncomingMessage;
 
+          // ── FIX 1: filter_ack — clear ALL dataset-scoped state, not just alarms ──
+          // When the server acknowledges a dataset filter change, any data still in
+          // state belongs to the previous dataset. Clear it all so the pipeline tab
+          // never shows stale cross-dataset data while the fresh fetch is in-flight.
           if (data.type === "filter_ack") {
             setState(prev => ({
               ...prev,
-              alarms: [],
-              activities: [],
-              logLines: [],
-              suggestions: [],
+              alarms:           [],
+              activities:       [],
+              logLines:         [],
+              suggestions:      [],
+              explainability:   null,
+              trust:            null,
+              kpis:             null,
+              thresholdHistory: [],
+              pipeline:         null,
             }));
             return;
           }
@@ -776,7 +785,10 @@ export const useIdpsDashboard = (selectedDataset = ""): IdpsDashboardState => {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── WebSocket filter update when dataset changes ──────────────────────
+  // ── FIX 2: dataset change — clear ALL dataset-scoped state immediately ──
+  // Previously only alarms/activities/logLines were cleared. explainability,
+  // trust, kpis, thresholdHistory and pipeline kept showing data from the
+  // previous dataset until the async refresh resolved (several seconds).
   useEffect(() => {
     filterVersion.current += 1;
     const version = filterVersion.current;
@@ -788,7 +800,18 @@ export const useIdpsDashboard = (selectedDataset = ""): IdpsDashboardState => {
         version,
       }));
     }
-    setState(prev => ({ ...prev, loading: true, alarms: [], activities: [], logLines: [] }));
+    setState(prev => ({
+      ...prev,
+      loading:          true,
+      alarms:           [],
+      activities:       [],
+      logLines:         [],
+      explainability:   null,
+      trust:            null,
+      kpis:             null,
+      thresholdHistory: [],
+      pipeline:         null,
+    }));
     refreshRef.current();
   }, [datasetKey]);
 

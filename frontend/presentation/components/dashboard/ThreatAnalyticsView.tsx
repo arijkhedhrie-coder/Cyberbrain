@@ -87,6 +87,8 @@ export function ThreatAnalyticsView({
 }: ThreatAnalyticsViewProps) {
   const [minimizationSeries, setMinimizationSeries] = useState<MinimizationPoint[]>([]);
   const globalState = useMemo(() => buildGlobalState(alarms, engines, kpis), [alarms, engines, kpis]);
+  const panelText = "#ffffff";
+  const labelBlue = "#7dd3fc";
 
   const analyticsSummary = useMemo(() => {
     if (minimizationSeries.length === 0) {
@@ -121,10 +123,10 @@ export function ThreatAnalyticsView({
       <section style={sectionShell}>
         <div style={{ display: "grid", gap: 8, marginBottom: 18 }}>
         
-          <div style={{ fontSize: 17, fontWeight: 800, color: "#e2e8f0"  }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: panelText  }}>
             Évolution de la pression de menace
           </div>
-          <div style={{ fontSize: 15, color: "#8ba5c0", lineHeight: 1.65, maxWidth: 820 }}>
+          <div style={{ fontSize: 18, color: panelText, lineHeight: 1.65, maxWidth: 820 }}>
             Le système a réduit la pression de menace de façon continue grâce aux contre-mesures IA.
           </div>
         </div>
@@ -141,10 +143,10 @@ export function ThreatAnalyticsView({
 
       <section style={sectionShell}>
         <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
-          <div style={{ fontSize: 17, fontWeight: 800, color: "#e2e8f0" }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: panelText }}>
             Lecture en un coup d'œil
           </div>
-          <div style={{ fontSize: 15, color: "#8ba5c0", lineHeight: 1.65 }}>
+          <div style={{ fontSize: 18, color: panelText, lineHeight: 1.65 }}>
             Les chiffres clés qui résument la courbe ci-dessus.
           </div>
         </div>
@@ -160,32 +162,32 @@ export function ThreatAnalyticsView({
             {
               label: "Pic d’alertes",
               value: formatMetric(analyticsSummary.peakAlerts),
-              tone: "#ff8aa3",
+              tone: "#7dd3fc",
               sub: "point le plus haut de la série live",
             },
             {
               label: "Alertes actuelles",
               value: formatMetric(analyticsSummary.currentAlerts),
-              tone: "#e2e8f0",
+              tone: "#60a5fa",
               sub: "dernier passage observé",
             },
             {
               label: "Risque résiduel",
               value: formatMetric(analyticsSummary.residualRisk, "%"),
-              tone: "#6ee7b7",
+              tone: "#38bdf8",
               sub: "risque restant après traitement",
             },
             {
               label: "Réduction 24h",
               value: formatMetric(analyticsSummary.reduction24h, "%"),
-              tone: "#7dd3fc",
+              tone: "#93c5fd",
               sub: "variation entre début et fin de série",
             },
           ].map((card) => (
             <div key={card.label} style={metricCardStyle}>
-              <div style={{ fontSize: 22, color: "#7dd3fc", marginBottom: 10 }}>{card.label}</div>
-              <div style={{ fontSize: 30, fontWeight: 800, color: card.tone, marginBottom: 6 }}>{card.value}</div>
-              <div style={{ fontSize: 15, color: "#8ba5c0", lineHeight: 1.5 }}>{card.sub}</div>
+              <div style={{ fontSize: 25, color: labelBlue, marginBottom: 10 }}>{card.label}</div>
+              <div style={{ fontSize: 33, fontWeight: 800, color: card.tone, marginBottom: 6 }}>{card.value}</div>
+              <div style={{ fontSize: 18, color: panelText, lineHeight: 1.5 }}>{card.sub}</div>
             </div>
           ))}
         </div>
@@ -193,10 +195,10 @@ export function ThreatAnalyticsView({
 
       <section style={sectionShell}>
         <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
-          <div style={{ fontSize: 17, fontWeight: 800, color: "#e2e8f0" }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: panelText }}>
             Quand les attaques arrivent
           </div>
-          <div style={{ fontSize: 15, color: "#8ba5c0", lineHeight: 1.65 }}>
+          <div style={{ fontSize: 18, color: panelText, lineHeight: 1.65 }}>
             Heatmap 7 jours × 24h — repère les fenêtres récurrentes pour planifier la défense.
           </div>
         </div>

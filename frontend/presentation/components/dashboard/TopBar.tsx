@@ -56,7 +56,7 @@ export const TopBar: FC<Props> = ({
           <span className="cb-topbar__brand-name">
             cyber<span className="cb-topbar__brand-accent">brain</span>
           </span>
-          <span className="cb-topbar__brand-tag">Security Command Center</span>
+          <span className="cb-topbar__brand-tag">Centre des opérations de sécurité</span>
         </div>
       </div>
 
@@ -79,8 +79,8 @@ export const TopBar: FC<Props> = ({
       <div className={`cb-pill ${apiReady ? "cb-pill--ok" : "cb-pill--off"}`}>
         <span className="cb-pill__dot" />
         {apiReady
-          ? `API · ${lastUpdate?.toLocaleTimeString("fr-FR") ?? "—"}`
-          : "API hors ligne"}
+          ? `  ${lastUpdate?.toLocaleTimeString("fr-FR") ?? "—"}`
+          : " hors ligne"}
       </div>
 
       <DarkModeToggle theme={theme} onToggle={onToggleTheme} />

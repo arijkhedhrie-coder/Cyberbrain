@@ -118,7 +118,7 @@ export function AttackHeatmap({ alarms, embedded = false, days = 7 }: AttackHeat
                 border: "1px solid rgba(53,212,255,0.22)",
                 background: "rgba(53,212,255,0.1)",
                 color: "#7dd3fc",
-                fontSize: 10,
+                fontSize: 13,
                 fontWeight: 700,
                 letterSpacing: "0.08em",
               }}
@@ -132,7 +132,7 @@ export function AttackHeatmap({ alarms, embedded = false, days = 7 }: AttackHeat
                 border: "1px solid rgba(251,191,36,0.22)",
                 background: "rgba(251,191,36,0.1)",
                 color: "#fbbf24",
-                fontSize: 10,
+                fontSize: 13,
                 fontWeight: 700,
                 letterSpacing: "0.08em",
               }}
@@ -140,7 +140,7 @@ export function AttackHeatmap({ alarms, embedded = false, days = 7 }: AttackHeat
               PIC {densestWindowLabel}
             </span>
           </div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: "#8ba5c0" }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 14, color: "#ffffff" }}>
             <span>● faible</span>
             <span style={{ color: "#fbbf24" }}>● soutenu</span>
             <span style={{ color: "#ff5b7f" }}>● critique</span>
@@ -149,7 +149,7 @@ export function AttackHeatmap({ alarms, embedded = false, days = 7 }: AttackHeat
       )}
 
       {alarms.length === 0 ? (
-        <div className="chart-empty" style={{ minHeight: embedded ? 300 : undefined }}>
+        <div className="chart-empty" style={{ minHeight: embedded ? 300 : undefined, color: "#ffffff", fontSize: 15 }}>
           Aucune alarme live disponible pour la heatmap.
         </div>
       ) : (
@@ -168,9 +168,9 @@ export function AttackHeatmap({ alarms, embedded = false, days = 7 }: AttackHeat
               <div
                 key={hour}
                 style={{
-                  fontSize: 10,
+                  fontSize: 13,
                   textAlign: "center",
-                  color: "#64748b",
+                  color: "#ffffff",
                   fontFamily: "var(--font-mono)",
                   letterSpacing: "0.04em",
                 }}
@@ -183,8 +183,8 @@ export function AttackHeatmap({ alarms, embedded = false, days = 7 }: AttackHeat
               <div key={bucket.key} style={{ display: "contents" }}>
                 <div
                   style={{
-                    fontSize: 10,
-                    color: "#94a3b8",
+                    fontSize: 13,
+                    color: "#ffffff",
                     fontFamily: "var(--font-mono)",
                     letterSpacing: "0.08em",
                     paddingRight: 10,
@@ -228,10 +228,10 @@ export function AttackHeatmap({ alarms, embedded = false, days = 7 }: AttackHeat
           gap: 12,
           flexWrap: "wrap",
         }}
-      >
-        <span className="stat-mini">{alarms.length} alarmes analysees</span>
-        <span className="stat-mini">{activeDayCount} jours avec activite visible</span>
-        <span className="stat-mini">Cellules basees uniquement sur les alarmes live/backend</span>
+        >
+        <span className="stat-mini" style={{ fontSize: 15, color: "#ffffff" }}>{alarms.length} alarmes analysees</span>
+        <span className="stat-mini" style={{ fontSize: 15, color: "#ffffff" }}>{activeDayCount} jours avec activite visible</span>
+        <span className="stat-mini" style={{ fontSize: 15, color: "#ffffff" }}>Cellules basees uniquement sur les alarmes live/backend</span>
       </div>
     </div>
   );

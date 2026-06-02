@@ -14,6 +14,7 @@ import { TooltipLabel } from "../common/TooltipLabel";
 
 type PipelineObservabilityTabProps = {
   alarms: AlarmItem[];
+  dataset?: string;
   explainability: ExplainabilityData | null;
   kpis: KpiData | null;
   pipeline: PipelineLatest | null;
@@ -40,8 +41,8 @@ const C = {
   borderSoft: "rgba(148,163,184,0.08)",
   text: "#eef0fa",
   textDim: "#cbd5e1",
-  muted: "#94a3b8",
-  mutedDeep: "#64748b",
+  muted: "#dbeafe",
+  mutedDeep: "#cbd5e1",
   purple: "#a78bfa",
   cyan: "#22d3ee",
   green: "#34d399",
@@ -174,15 +175,6 @@ function humanizeConfidence(l: string | null | undefined): string {
   if (n === "ACCEPTABLE") return "correcte";
   if (n === "UNCERTAIN") return "à surveiller";
   if (n === "LOW") return "faible";
-  if (!n || n === "N/A") return "indisponible";
-  return capitalize(n.toLowerCase());
-}
-
-function humanizeDrift(l: string | null | undefined): string {
-  const n = String(l ?? "").trim().toUpperCase();
-  if (n === "STABLE") return "stable";
-  if (n === "SHIFTING") return "légère";
-  if (n === "DRIFTING") return "détectée";
   if (!n || n === "N/A") return "indisponible";
   return capitalize(n.toLowerCase());
 }
@@ -334,14 +326,6 @@ function agreementDescription(value: number | null | undefined): string {
   return "Divergences entre les modèles.";
 }
 
-function driftDescription(label: string | null | undefined): string {
-  const n = String(label ?? "").trim().toUpperCase();
-  if (!n || n === "STABLE") return "Aucune dérive détectée.";
-  if (n === "SHIFTING") return "Légère dérive en cours.";
-  if (n === "DRIFTING") return "Dérive significative détectée.";
-  return "État de dérive indisponible.";
-}
-
 function stabilityDescription(label: string | null | undefined): string {
   const n = String(label ?? "").trim().toUpperCase();
   if (n === "HIGH") return "Comportement très régulier.";
@@ -350,9 +334,35 @@ function stabilityDescription(label: string | null | undefined): string {
   return "Stabilité non disponible.";
 }
 
+/* ── Data freshness helper ────────────────────────────────────────────── */
+type FreshnessInfo = { label: string; color: string; ageMs: number };
+
+function computeFreshness(timestamp: string | null | undefined): FreshnessInfo {
+  if (!timestamp) return { label: "Données en attente", color: C.mutedDeep, ageMs: -1 };
+  const ageMs = Date.now() - new Date(timestamp).getTime();
+  if (Number.isNaN(ageMs) || ageMs < 0) return { label: "Horodatage invalide", color: C.mutedDeep, ageMs: -1 };
+  const seconds = Math.floor(ageMs / 1000);
+  const minutes = Math.floor(ageMs / 60000);
+  if (seconds < 60) return { label: `Actualisé il y a ${seconds}s`, color: C.green, ageMs };
+  if (minutes < 5)  return { label: `Actualisé il y a ${minutes} min`, color: C.green, ageMs };
+  if (minutes < 15) return { label: `Données âgées de ${minutes} min`, color: C.amber, ageMs };
+  return { label: `Données âgées de ${minutes} min — vérifier la connexion`, color: C.red, ageMs };
+}
+
+function prettifyDataset(dataset: string | undefined): string {
+  if (!dataset) return "Source par défaut";
+  const n = dataset.trim().toLowerCase();
+  if (n === "fusion" || n === "__fusion__" || n === "merged") return "Vue consolidée";
+  return dataset
+    .replace(/^__|__$/g, "")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 /* ── Component ────────────────────────────────────────────────────────── */
 export function PipelineObservabilityTab({
-  alarms, explainability, kpis, pipeline, thresholdHistory, trust,
+  alarms, dataset, explainability, kpis, pipeline, thresholdHistory, trust,
 }: PipelineObservabilityTabProps) {
   const sortedThresholdHistory = useMemo(
     () => [...thresholdHistory].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()),
@@ -405,6 +415,19 @@ export function PipelineObservabilityTab({
       ? `${latestThreshold.nb_alarms_pass1} → ${latestThreshold.nb_alarms_final} alertes`
       : "N/A";
 
+  // Alert delta as a percentage of the total alarm population — gives real context
+  const totalAlarmCount = alarms.length;
+  const alertDeltaPercent =
+    alertDelta !== null && latestThreshold && latestThreshold.nb_alarms_pass1 > 0
+      ? ((alertDelta / latestThreshold.nb_alarms_pass1) * 100)
+      : null;
+
+  // Data freshness — tells users if they're looking at live or stale data
+  const freshnessInfo = computeFreshness(currentObservationTime);
+
+  // Dataset label for display
+  const datasetLabel = prettifyDataset(dataset);
+
   /* ═══════════════ SECTION 1 — Cards ═══════════════════════════════════ */
   const systemCards = [
     {
@@ -431,7 +454,17 @@ export function PipelineObservabilityTab({
       tone: alertDelta !== null && alertDelta < 0 ? C.green : alertDelta !== null && alertDelta > 0 ? C.red : C.text,
       hint:
         latestThreshold && alertDelta !== null
-          ? alertDelta < 0
+          ? alertDeltaPercent !== null
+            ? alertDelta === 0
+              ? "Aucun changement après correction."
+              : `${alertDelta > 0 ? "+" : ""}${alertDeltaPercent.toFixed(1)}% des alertes initiales — ${
+                  Math.abs(alertDeltaPercent) < 5
+                    ? "variation dans la marge normale."
+                    : Math.abs(alertDeltaPercent) < 20
+                    ? "variation notable."
+                    : "variation significative."
+                }`
+            : alertDelta < 0
             ? `Réduction de ${Math.abs(alertDelta)} alerte${Math.abs(alertDelta) > 1 ? "s" : ""} après correction.`
             : alertDelta > 0
             ? `${alertDelta} alerte${alertDelta > 1 ? "s" : ""} supplémentaire${alertDelta > 1 ? "s" : ""} après analyse.`
@@ -439,17 +472,20 @@ export function PipelineObservabilityTab({
           : "",
     },
     {
-      label: "Dernière réaction",
-      value: latestThreshold && currentObservationTime ? formatTime(currentObservationTime) : "En attente",
-      tone: C.text,
-      hint: latestThreshold ? "Horodatage du dernier cycle." : "",
+      label: "Fraîcheur des données",
+      value: freshnessInfo.ageMs >= 0
+        ? freshnessInfo.ageMs < 300000
+          ? "En direct"
+          : "Récent"
+        : "—",
+      tone: freshnessInfo.color,
+      hint: freshnessInfo.label,
     },
   ];
 
   /* ═══════════════ SECTION 2 — Trust meters ════════════════════════════ */
   const confidenceValue = trust?.confidence_in_metrics ?? explainability?.model_context.trust_score ?? null;
   const agreementValue = trust?.model_agreement ?? explainability?.model_context.agreement ?? null;
-  const driftValue = trust?.drift_score ?? null;
 
   const trustMeters = [
     {
@@ -476,16 +512,6 @@ export function PipelineObservabilityTab({
       textOnly: false,
     },
     {
-      label: "Dérive",
-      tooltip: getMetricTooltip("drift"),
-      value: driftValue,
-      text: humanizeDrift(trust?.drift_label ?? explainability?.model_context.drift_label),
-      description: driftDescription(trust?.drift_label ?? explainability?.model_context.drift_label),
-      tone: C.purple,
-      raw: true,
-      textOnly: false,
-    },
-    {
       label: "Stabilité",
       tooltip: getMetricTooltip("stability"),
       value: null as number | null,
@@ -499,58 +525,7 @@ export function PipelineObservabilityTab({
 
   return (
     <div style={shell}>
-      {/* ════════════════════ HERO STATUS BANNER ════════════════════ */}
-      <div
-        style={{
-          padding: "24px 28px",
-          borderRadius: 20,
-          border: `1px solid ${C.red}40`,
-          background: `linear-gradient(135deg, ${C.red}18, ${C.red}06)`,
-          display: "grid",
-          gap: 8,
-          textAlign: "center",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "center", gap: 10, alignItems: "center" }}>
-          <span
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: C.red,
-              boxShadow: `0 0 12px ${C.red}`,
-            }}
-          />
-          <span
-            style={{
-              fontSize: 13,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-              color: C.red,
-              fontWeight: 700,
-              fontFamily: "'JetBrains Mono', monospace",
-            }}
-          >
-            Analyse explicable · {latestDecision ? humanizeDecisionShort(latestDecision.action) : "Surveillance active"}
-          </span>
-        </div>
-        <div
-          style={{
-            fontFamily: "'Space Grotesk', system-ui, sans-serif",
-            fontSize: 26,
-            fontWeight: 700,
-            color: C.text,
-            lineHeight: 1.2,
-          }}
-        >
-          {primaryNarrative}
-        </div>
-        <div style={{ fontSize: 15, color: C.muted }}>
-          {latestDecision
-            ? humanizeDecisionAction(latestDecision.action)
-            : "Lecture en direct des seuils et des modèles."}
-        </div>
-      </div>
+
 
       {/* ════════════════════ SECTION 1 — Le système a-t-il réagi ? ════════════════════ */}
       <section style={section}>
@@ -577,93 +552,8 @@ export function PipelineObservabilityTab({
       <section style={section}>
         <header style={sectionHeader}>
           <div style={sectionTitle}>Pourquoi cette décision</div>
-          <div style={sectionSubtitle}>Le signal principal et l'état des modèles.</div>
+          <div style={sectionSubtitle}>L'état des modèles.</div>
         </header>
-
-        <div
-          style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(280px, 1fr)", gap: 18 }}
-        >
-          {/* Narrative panel */}
-          <div
-            style={{
-              padding: 24,
-              borderRadius: 20,
-              border: `1px solid ${C.purple}30`,
-              background: `linear-gradient(160deg, ${C.purple}12, ${C.surfaceDeep})`,
-              display: "grid",
-              gap: 18,
-              alignContent: "start",
-            }}
-          >
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {topAlarm && (
-                <span style={pill(C.cyan, `${C.cyan}14`)}>{humanizeEngine(topAlarm.engine)}</span>
-              )}
-              {topAlarm && (
-                <span style={pill(C.red, `${C.red}14`)}>Score {topAlarm.score.toFixed(1)}</span>
-              )}
-              {latestDecision && (
-                <span style={pill(C.green, `${C.green}14`)}>
-                  {humanizeDecisionShort(latestDecision.action)}
-                </span>
-              )}
-            </div>
-
-            <div
-              style={{
-                fontFamily: "'Space Grotesk', system-ui, sans-serif",
-                fontSize: 28,
-                lineHeight: 1.25,
-                fontWeight: 700,
-                color: C.text,
-              }}
-            >
-              {topAlarm
-                ? `Signal principal : ${humanizeEngine(topAlarm.engine)}`
-                : "Signal principal indisponible."}
-            </div>
-
-            <div style={{ fontSize: 15, color: C.textDim, lineHeight: 1.6 }}>
-              {latestDecision
-                ? humanizeDecisionAction(latestDecision.action)
-                : "Activité jugée suffisamment suspecte pour déclencher une correction."}
-            </div>
-
-            <div style={{ height: 1, background: `linear-gradient(90deg, ${C.purple}30, transparent)` }} />
-
-            {/* Detail grid — "Action appliquée" removed (already visible in pills above) */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              {[
-                [
-                  "Seuil de décision",
-                  thresholdContext
-                    ? thresholdContext.pass1 !== undefined && thresholdContext.pass2 !== undefined
-                      ? `${formatNullable(thresholdContext.pass1, 1)} → ${formatNullable(thresholdContext.pass2, 1)}`
-                      : formatNullable(thresholdContext.threshold, 1)
-                    : "N/A",
-                ],
-                ["Moteurs corrigés", correctionType],
-                ["Bilan alertes", alertBilan],
-                ["Moteur concerné", humanizeEngine(topAlarm?.engine)],
-                ["Observation", formatTime(latestDecision?.timestamp ?? dynamicConfigEvent?.timestamp)],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <div style={statLabel}>{label}</div>
-                  <div
-                    style={{
-                      fontSize: 16,
-                      color: C.text,
-                      fontWeight: 600,
-                      marginTop: 6,
-                      fontFamily: "'JetBrains Mono', monospace",
-                    }}
-                  >
-                    {value}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
 
           {/* Trust meters */}
           <div
@@ -680,7 +570,6 @@ export function PipelineObservabilityTab({
             <div style={{ ...statLabel, color: C.cyan }}>État des modèles</div>
 
             {trustMeters.map((m) => {
-              // For drift (raw): bar reflects actual drift value capped at 1.0 (0 = no drift = good)
               // For normal metrics: value is already in [0, 1]
               const pct = m.raw
                 ? Math.min(1, Math.max(0, m.value ?? 0))
@@ -737,7 +626,6 @@ export function PipelineObservabilityTab({
               );
             })}
           </div>
-        </div>
       </section>
 
       {/* ════════════════════ SECTION 3 — Comportement de l'attaquant ════════════════════ */}
@@ -777,7 +665,7 @@ export function PipelineObservabilityTab({
             >
               {pattern.label}
             </div>
-            <div style={{ fontSize: 15, color: "white", lineHeight: 1.6 }}>{pattern.detail}</div>
+            <div style={{ fontSize: 15, color: C.textDim, lineHeight: 1.6 }}>{pattern.detail}</div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 6 }}>
               {[
@@ -813,11 +701,11 @@ export function PipelineObservabilityTab({
                 >
                   <div
                     style={{
-                      fontSize: 12,
-                      color: "white",
+                      fontSize: 13,
+                      color: C.blue,
                       letterSpacing: "0.08em",
                       textTransform: "uppercase",
-                      fontWeight: 500,
+                      fontWeight: 600,
                     }}
                   >
                     {m.label}
@@ -963,3 +851,7 @@ export function PipelineObservabilityTab({
     </div>
   );
 }
+
+
+
+

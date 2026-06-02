@@ -101,7 +101,7 @@
 }
 
 /* ══ BASE ══════════════════════════════════════════════════════════════════ */
-html { font-size: 16px; scroll-behavior: smooth; }
+html { font-size: 18px; scroll-behavior: smooth; }
 
 body {
   font-family: var(--font-sans);

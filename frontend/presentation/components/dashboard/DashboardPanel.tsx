@@ -416,7 +416,7 @@ const KpiTile: FC<{ label: string; value: ReactNode; accent?: string; sub?: stri
   onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.transform = "translateY(0)"; }}
   >
     <div style={{
-      fontSize: 12.5, fontWeight: 700, letterSpacing: "0.12em",
+      fontSize: 15.5, fontWeight: 700, letterSpacing: "0.12em",
       color: "#7dd3fc", textTransform: "uppercase",
       fontFamily: "var(--font-mono)", marginBottom: 8,
     }}>
@@ -426,7 +426,7 @@ const KpiTile: FC<{ label: string; value: ReactNode; accent?: string; sub?: stri
       fontFamily: "var(--font-mono)", fontSize: 28, fontWeight: 700,
       color: accent, lineHeight: 1, letterSpacing: "-0.5px",
     }}>{value}</div>
-    {sub && <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>{sub}</div>}
+    {sub && <div style={{ marginTop: 6, fontSize: 15, color: "var(--text-muted)" }}>{sub}</div>}
   </div>
 );
 
@@ -476,12 +476,12 @@ const EnginePressurePanel: FC<{ engines: EngineScore[]; alarms: AlarmItem[] }> =
     }}>
       <div style={{ marginBottom: 4 }}>
         <div style={{
-          fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 600,
+          fontFamily: "var(--font-display)", fontSize: 19, fontWeight: 600,
           color: "var(--text-primary)", letterSpacing: "-0.005em",
         }}>
           Pression par moteur de détection
         </div>
-        <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 3 }}>
+        <div style={{ fontSize: 16, color: "var(--text-muted)", marginTop: 3 }}>
           Fingerprint live des moteurs à gauche, détail des seuils et de la pression en temps réel à droite.
         </div>
       </div>
@@ -497,18 +497,18 @@ const EnginePressurePanel: FC<{ engines: EngineScore[]; alarms: AlarmItem[] }> =
         {/* ── Engine rows ── */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {list.length === 0 ? (
-            <div style={{
-              minHeight: 180,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 12,
-              border: "1px dashed var(--border)",
-              color: "var(--text-muted)",
-              fontSize: 14,
-              textAlign: "center",
-              padding: 18,
-            }}>
+              <div style={{
+                minHeight: 180,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 12,
+                border: "1px dashed var(--border)",
+                color: "var(--text-muted)",
+                fontSize: 17,
+                textAlign: "center",
+                padding: 18,
+              }}>
               Aucun score moteur live disponible pour cette source.
             </div>
           ) : (
@@ -529,7 +529,7 @@ const EnginePressurePanel: FC<{ engines: EngineScore[]; alarms: AlarmItem[] }> =
                     animation: (e.alarms ?? 0) > 0 ? "pulse-dot 1.4s ease-in-out infinite" : "none",
                   }}/>
                   <span style={{
-                    fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700,
+                    fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 700,
                     color: "var(--text-primary)", letterSpacing: "0.08em",
                   }}>
                     {e.engine}
@@ -622,7 +622,7 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div style={{
-          fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 600,
+          fontFamily: "var(--font-display)", fontSize: 19, fontWeight: 600,
           color: "var(--text-primary)",
         }}>
           Flux d'alertes en direct
@@ -630,7 +630,7 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
         {criticals > 0 && (
           <span style={{
             padding: "4px 12px", borderRadius: 999,
-            fontSize: 12, fontWeight: 700, letterSpacing: "0.1em",
+            fontSize: 15, fontWeight: 700, letterSpacing: "0.1em",
             fontFamily: "var(--font-mono)",
             background: "rgba(255,85,119,0.12)",
             color: "var(--red)",
@@ -655,7 +655,7 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
                 background: active ? `${option.color}18` : "rgba(15,23,42,0.3)",
                 color: active ? option.color : "var(--text-muted)",
                 fontFamily: "var(--font-mono)",
-                fontSize: 12,
+                fontSize: 15,
                 fontWeight: 700,
                 letterSpacing: "0.08em",
                 cursor: "pointer",
@@ -671,7 +671,7 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
       {list.length === 0 ? (
         <div style={{
           flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 14, color: "var(--text-muted)",
+          fontSize: 17, color: "var(--text-muted)",
         }}>
           Aucune alarme pour ce filtre.
         </div>
@@ -687,7 +687,7 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
                 style={{
                   ["--sev-color" as any]: sev,
                   display: "grid",
-                  gridTemplateColumns: "48px 1fr auto",
+                  gridTemplateColumns: "48px 1fr",
                   alignItems: "center",
                   gap: 12,
                   padding: "12px 4px",
@@ -713,24 +713,18 @@ const LiveAlarmFeed: FC<{ alarms: AlarmItem[]; isFusionView: boolean }> = ({ ala
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{
-                    fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 700,
+                    fontFamily: "var(--font-mono)", fontSize: 17, fontWeight: 700,
                     color: "var(--text-primary)", letterSpacing: "0.04em",
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}>
                     {a.type.replace(/_/g, " ")} · {a.source_ip}
                   </div>
                   <div style={{
-                    fontSize: 12.5, color: "var(--text-muted)", marginTop: 2,
+                    fontSize: 15.5, color: "var(--text-muted)", marginTop: 2,
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}>
                     {a.country || "—"} · {a.engine} · {isFusionView ? "view only" : (a.action || "—").split("_")[0]}
                   </div>
-                </div>
-                <div style={{
-                  fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 700,
-                  color: sev, minWidth: 32, textAlign: "right",
-                }}>
-                  {a.score ?? 0}
                 </div>
               </div>
             );
@@ -885,7 +879,7 @@ const JourneyPipeline: FC<{
         >
           Parcours du systeme
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 18 }}>
+        <div style={{ fontSize: 15.5, color: "var(--text-muted)", marginTop: 18 }}>
           Lecture live du dernier passage du pipeline.
         </div>
       </div>
@@ -925,7 +919,7 @@ const JourneyPipeline: FC<{
                   {tone.icon}
                 </div>
 
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.4, fontWeight: 700, letterSpacing: "0.04em", color: isDone ? "var(--text-secondary)" : isActive ? "var(--amber)" : "var(--text-muted)", textAlign: "center", lineHeight: 1.2, maxWidth: 100, whiteSpace: "normal" }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 13.4, fontWeight: 700, letterSpacing: "0.04em", color: isDone ? "var(--text-secondary)" : isActive ? "var(--amber)" : "var(--text-muted)", textAlign: "center", lineHeight: 1.2, maxWidth: 100, whiteSpace: "normal" }}>
                   {stage.label}
                 </span>
               </div>
@@ -975,7 +969,7 @@ const JourneyPipeline: FC<{
             <div
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: 21,
+                fontSize: 24,
                 fontWeight: 700,
                 color: confidenceTone,
                 lineHeight: 1,
@@ -985,7 +979,7 @@ const JourneyPipeline: FC<{
             </div>
             <div
               style={{
-                fontSize: 11,
+                fontSize: 14,
                 fontWeight: 700,
                 letterSpacing: "0.14em",
                 color: "var(--text-muted)",
@@ -1022,7 +1016,7 @@ const JourneyPipeline: FC<{
                 style={{
                   padding: "4px 10px",
                   borderRadius: 999,
-                  fontSize: 11.5,
+                  fontSize: 14.5,
                   fontWeight: 700,
                   letterSpacing: "0.1em",
                   fontFamily: "var(--font-mono)",
@@ -1045,7 +1039,7 @@ const JourneyPipeline: FC<{
             >
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: 14,
                   letterSpacing: "0.12em",
                   textTransform: "uppercase",
                   color: "var(--text-muted)",
@@ -1058,7 +1052,7 @@ const JourneyPipeline: FC<{
               </span>
               <span
                 style={{
-                  fontSize: 12,
+                  fontSize: 15,
                   fontWeight: 700,
                   color: stabilityTone,
                   fontFamily: "var(--font-mono)",

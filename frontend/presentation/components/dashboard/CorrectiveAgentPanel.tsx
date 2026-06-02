@@ -1029,11 +1029,6 @@ export const CorrectiveAgentPanel: FC<CorrectiveAgentPanelProps> = ({
           </Card>
 
           {/* FIX 3 — footer muted text now uses #cbd5e1 (clearly visible on dark bg) */}
-          <div style={{ ...mutedText, display: "flex", gap: 18, flexWrap: "wrap" }}>
-            <span>Sources live: {alarms[0]?.source_ip ?? "--"}</span>
-            <span>Traces correctives: {correctiveActivities.length}</span>
-            <span>Dataset: {selectedDataset || "local default"}</span>
-          </div>
         </div>
       </div>
     </div>
