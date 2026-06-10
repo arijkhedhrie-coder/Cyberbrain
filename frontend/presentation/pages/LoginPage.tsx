@@ -187,10 +187,7 @@ export const LoginPage = () => {
               </div>
             </div>
             <h1>Security<span>Dashboard</span></h1>
-            <div className="badge">
-              <span className="badge-dot" />
-              SOC Access Portal
-            </div>
+            
           </div>
 
           <form onSubmit={handleSubmit} className="login-form">

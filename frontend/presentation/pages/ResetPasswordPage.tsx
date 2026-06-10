@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 
@@ -6,16 +6,30 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export const ResetPasswordPage = () => {
   const [searchParams] = useSearchParams();
-  const token = searchParams.get("token") || "";
+  const initialEmail = searchParams.get("email") || "";
   const navigate = useNavigate();
 
+  const [email, setEmail] = useState(initialEmail);
+  const [otp, setOtp] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    setEmail(initialEmail);
+  }, [initialEmail]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email.trim()) {
+      setMessage({ type: "error", text: "Veuillez renseigner votre adresse email." });
+      return;
+    }
+    if (!otp.trim()) {
+      setMessage({ type: "error", text: "Veuillez saisir le code OTP reçu par email." });
+      return;
+    }
     if (!password || password !== confirm) {
       setMessage({ type: "error", text: "Les mots de passe ne correspondent pas." });
       return;
@@ -23,13 +37,18 @@ export const ResetPasswordPage = () => {
     setLoading(true);
     try {
       await axios.post(`${API_BASE}/auth/reset-password`, {
-        token,
+        email: email.trim(),
+        otp: otp.trim(),
         new_password: password,
       });
-      setMessage({ type: "success", text: "Mot de passe réinitialisé. Redirection vers la connexion..." });
+      setMessage({ type: "success", text: "Code validé. Mot de passe réinitialisé. Redirection vers la connexion..." });
       setTimeout(() => navigate("/login"), 3000);
-    } catch {
-      setMessage({ type: "error", text: "Token invalide ou expiré. Veuillez refaire une demande." });
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail;
+      setMessage({
+        type: "error",
+        text: detail || "Code OTP invalide ou expiré. Veuillez refaire une demande.",
+      });
     } finally {
       setLoading(false);
     }
@@ -38,8 +57,26 @@ export const ResetPasswordPage = () => {
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h2 style={{ color: "#00d4ff" }}>🔐 Nouveau mot de passe</h2>
+        <h2 style={{ color: "#00d4ff" }}>🔐 Vérification OTP</h2>
         <form onSubmit={handleSubmit} style={styles.form}>
+          <input
+            type="email"
+            placeholder="Adresse email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            required
+            style={styles.input}
+          />
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]{6}"
+            placeholder="Code OTP à 6 chiffres"
+            value={otp}
+            onChange={e => setOtp(e.target.value)}
+            required
+            style={styles.input}
+          />
           <input
             type="password"
             placeholder="Nouveau mot de passe"
@@ -62,7 +99,7 @@ export const ResetPasswordPage = () => {
             </div>
           )}
           <button type="submit" disabled={loading} style={styles.button}>
-            {loading ? "Réinitialisation…" : "Réinitialiser le mot de passe"}
+            {loading ? "Vérification…" : "Vérifier et réinitialiser"}
           </button>
         </form>
       </div>

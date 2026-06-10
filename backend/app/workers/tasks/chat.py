@@ -38,7 +38,11 @@ def generate_chat_response(
     except SoftTimeLimitExceeded:
         logger.warning("Chat task soft-timed out id=%s", self.request.id)
         return {
-            "response": fallback_response or build_chat_fallback_response(context, user_message),
+            "response": build_chat_fallback_response(
+                context,
+                user_message,
+                reason="Le worker a depasse le delai autorise",
+            ),
             "source": "fallback",
         }
     except Exception as exc:
@@ -58,6 +62,10 @@ def generate_chat_response(
             type(exc).__name__,
         )
         return {
-            "response": fallback_response or build_chat_fallback_response(context, user_message),
+            "response": build_chat_fallback_response(
+                context,
+                user_message,
+                reason=f"{type(exc).__name__}: {exc}",
+            ),
             "source": "fallback",
         }

@@ -7,7 +7,7 @@ ROOT = os.path.dirname(os.path.dirname(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from app.utils.metriques import classify_attack_profile
+from app.services.metriques import classify_attack_profile
 
 
 class TestMetricsClassification(unittest.TestCase):

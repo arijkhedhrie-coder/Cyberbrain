@@ -1,18 +1,4 @@
-"""
-prediction_engine.py — Pre-attack forecasting from normalized logs
-══════════════════════════════════════════════════════════════════════
-Goal: convert evolving log patterns into a "prediction_score" and
-pre-attack flags (BOTNET_WARMUP, SPRAY_PHASE, CRASH_COMING, DATA_EXFIL_START).
 
-Input:  df_norm (standardized columns from src/adapter.py)
-Output: dict:
-  {
-    "prediction_score": int,
-    "signals": {...},
-    "flags": [...],
-    "predicted_events": [...]
-  }
-"""
 
 from __future__ import annotations
 

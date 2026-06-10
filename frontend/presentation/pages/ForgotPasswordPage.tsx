@@ -131,7 +131,10 @@ export const ForgotPasswordPage = () => {
     setLoading(true);
     try {
       await axios.post(`${API_BASE}/auth/forgot-password`, { email });
-      setMessage({ type: "success", text: "Un lien de réinitialisation a été envoyé à votre adresse email." });
+      setMessage({ type: "success", text: "Un code OTP a été envoyé à votre adresse email." });
+      setTimeout(() => {
+        navigate(`/reset-password?email=${encodeURIComponent(email)}`);
+      }, 1400);
     } catch {
       setMessage({ type: "error", text: "Adresse introuvable ou erreur serveur. Vérifiez votre email." });
     } finally {
@@ -170,7 +173,7 @@ export const ForgotPasswordPage = () => {
             </h2>
 
             <p className="forgot-subtitle">
-              Saisissez votre adresse email admin. Vous recevrez un lien sécurisé pour réinitialiser votre accès.
+              Saisissez votre adresse email admin. Vous recevrez un code OTP sécurisé pour vérifier votre demande.
             </p>
           </div>
 
@@ -220,7 +223,7 @@ export const ForgotPasswordPage = () => {
 
             <button type="submit" className="forgot-button" disabled={loading}>
               <span className="button-text">
-                {loading ? (
+                  {loading ? (
                   <>
                     <svg className="spinner" viewBox="0 0 50 50">
                       <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round"/>
@@ -228,7 +231,7 @@ export const ForgotPasswordPage = () => {
                     Envoi en cours…
                   </>
                 ) : (
-                  "Envoyer le lien de réinitialisation"
+                    "Envoyer le code OTP"
                 )}
               </span>
               {!loading && (

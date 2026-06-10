@@ -180,8 +180,8 @@ except ImportError as _ws_import_err:
 # Imports métier
 # ─────────────────────────────────────────────────────────────────────────────
 
-# OK — app/utils/metriques.py
-from app.utils.metriques import (
+# OK — app/services/metriques.py
+from app.services.metriques import (
     calculer_metriques,
     get_summary_for_detector,
     compute_drift_score,
@@ -210,8 +210,8 @@ from app.ai.agents.memory import (
 from app.core.config.hybrid_config import DynamicConfig
 
 # CORRECTION 4 : ip_profiler n'est pas à la racine de app/
-# → app/utils/ip_profiler.py
-from app.utils.ip_profiler import (
+# → app/services/ip_profiler.py
+from app.services.ip_profiler import (
     dedup_logs,
     build_ip_profiles,
     data_quality_label,
@@ -1660,7 +1660,7 @@ def main() -> None:
                 ip_profiles = build_ip_profiles(df)
                 LOG.info("[PROFILES] Built %d IP profiles", len(ip_profiles))
 
-                import app.utils.ip_profiler as _ip_profiler_mod
+                import app.services.ip_profiler as _ip_profiler_mod
                 _ip_profiler_mod._current_session_profiles = ip_profiles
                 _ip_profiler_mod._current_ml_score_weight = ml_score_weight
 

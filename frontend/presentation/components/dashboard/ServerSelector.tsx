@@ -10,7 +10,8 @@ export const ServerSelector = ({ selected, onChange }: Props) => {
   const { servers, loading } = useServers();
 
   useEffect(() => {
-    if (!selected && servers.length > 0) {
+    const selectedExists = servers.some((server) => server.id === selected);
+    if (servers.length > 0 && !selectedExists) {
       onChange(servers[0].id);
     }
   }, [onChange, selected, servers]);

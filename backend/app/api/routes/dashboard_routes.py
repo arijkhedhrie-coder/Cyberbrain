@@ -97,13 +97,6 @@ def _available_dataset_ids() -> list[str]:
     return sorted(names)
 
 
-def _should_expose_fusion_dataset(datasets: list[str]) -> bool:
-    # Fusion replay can aggregate across the event store even when there is no
-    # legacy merged payload in PIPELINE_RESULTS, so expose the selector option
-    # whenever we have at least one real dataset to overlay.
-    return bool(datasets) or LEGACY_MERGED_DATASET in PIPELINE_RESULTS
-
-
 def _default_dataset_id() -> str | None:
     datasets = _available_dataset_ids()
     return datasets[0] if datasets else None
@@ -1191,7 +1184,6 @@ def api_health() -> dict[str, Any]:
 @router.get("/datasets")
 def api_datasets(format: str = Query(default="list")):
     datasets = _available_dataset_ids()
-    expose_fusion = _should_expose_fusion_dataset(datasets)
     if format == "rich":
         items = [
             {
@@ -1202,16 +1194,7 @@ def api_datasets(format: str = Query(default="list")):
             }
             for dataset_id in datasets
         ]
-        if expose_fusion:
-            items.append({
-                "id": "fusion",
-                "label": "fusion",
-                "display": FUSION_LABEL,
-                "sources": datasets,
-            })
         return items
-    if expose_fusion:
-        return datasets + ["fusion"]
     return datasets
 
 

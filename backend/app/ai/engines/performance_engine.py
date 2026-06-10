@@ -1,42 +1,4 @@
-"""
-performance_engine.py — Phase B: Trust Score Engine
-═══════════════════════════════════════════════════════════════════════════════
-Single public function:
 
-    compute_trust(session_data, alarmes, threshold_snapshots) → dict
-
-Takes all Phase A outputs as inputs and collapses them into 5 numbers that
-answer the question: "how well is our IDPS working right now?"
-
-Output:
-    {
-        "trust_score":             0.91,   # unified trust score 0–1 (= confidence_in_metrics)
-        "status":                  "TRUSTWORTHY",   # label for dashboard
-        "risk_of_false_decision":  "LOW",  # HIGH / MEDIUM / LOW
-        "model_agreement":         0.87,   # avg agreement of IF/LOF/SVM/DBSCAN
-        "false_positive_rate":     0.33,   # fraction of alarms with only 1 model
-        "drift_score":             0.031,  # abs change in anomaly rate vs last session
-        "stability":               "HIGH", # HIGH / MEDIUM / LOW — session consistency
-        "confidence_in_metrics":   0.91,   # same as trust_score (backward compat)
-        "confidence_label":        "TRUSTWORTHY",   # same as status (backward compat)
-        "signals_summary":         "...",  # human-readable one-liner
-    }
-
-Inputs come from:
-    A.1 → model_agreement, false_positive_rate  (from threshold_snapshots[0])
-    A.3 → drift_score, drift_label              (from session_data / metrics_summary)
-    A.4 → stability, stable_signals             (from session_data / metrics_summary)
-    Ph0 → noise_ratio, ml_score_weight          (from session_data / pipeline_start)
-
-The confidence_in_metrics score is a weighted combination:
-    0.35 × model_agreement
-    0.25 × (1 - false_positive_rate)
-    0.20 × (1 - drift_score capped at 0.30)
-    0.20 × stability_score (HIGH=1.0, MEDIUM=0.6, LOW=0.2)
-
-Pure math — no LLM, no randomness. Same inputs always produce the same output.
-═══════════════════════════════════════════════════════════════════════════════
-"""
 
 from __future__ import annotations
 

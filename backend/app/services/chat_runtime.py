@@ -3,11 +3,9 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-api_key = os.getenv("GROQ_API_KEY")
-
-
 def call_llm(prompt: str, *, timeout_seconds: float = 6.0) -> str:
     """Quick Groq call using the same model as the agents."""
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise RuntimeError("GROQ_API_KEY is not configured.")
 
@@ -64,9 +62,12 @@ def build_chat_prompt(message: str, context: str) -> str:
     return f"{system_prompt}\n\nUtilisateur : {message}\nAssistant :"
 
 
-def build_chat_fallback_response(context: str, user_message: str) -> str:
-    return (
+def build_chat_fallback_response(context: str, user_message: str, *, reason: str | None = None) -> str:
+    message = (
         "Le service d'analyse approfondie est temporairement indisponible. "
         f"Resume disponible : {context} "
-        "Tu peux reessayer dans quelques instants pour une reponse IA complete."
     )
+    if reason:
+        message += f"Cause technique : {reason}. "
+    message += "Tu peux reessayer dans quelques instants pour une reponse IA complete."
+    return message

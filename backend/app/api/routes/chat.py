@@ -22,11 +22,18 @@ class ChatRequest(BaseModel):
     message: str
 
 
+def _chat_failure_reason(exc: Exception) -> str:
+    if isinstance(exc, TimeoutError):
+        return "Le service de file d'attente a depasse le delai de reponse"
+    if isinstance(exc, RuntimeError):
+        return str(exc)
+    return f"{type(exc).__name__}: {exc}"
+
+
 @router.post("/chat")
 async def chat_endpoint(req: ChatRequest, request: Request) -> dict[str, str]:
     context = get_dashboard_context()
     prompt = build_chat_prompt(req.message, context)
-    fallback_response = build_chat_fallback_response(context, req.message)
     dispatcher = get_task_dispatcher(request.app)
 
     if dispatcher.settings.enabled:
@@ -36,7 +43,7 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> dict[str, str]:
                 prompt=prompt,
                 context=context,
                 user_message=req.message,
-                fallback_response=fallback_response,
+                fallback_response="",
             )
             result = await asyncio.to_thread(
                 dispatcher.wait_for_result,
@@ -45,15 +52,12 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> dict[str, str]:
             )
             if isinstance(result, dict) and result.get("response"):
                 return {"response": str(result["response"])}
-        except TimeoutError:
+        except TimeoutError as exc:
             logger.warning("Chat worker timed out; falling back to local execution.")
-            pass
         except RuntimeError as exc:
             logger.warning("Chat worker unavailable; falling back to local execution: %s", exc)
-            pass
-        except Exception:
+        except Exception as exc:
             logger.exception("Chat worker execution failed; falling back to local execution.")
-            pass
 
     try:
         answer = await asyncio.wait_for(
@@ -65,6 +69,12 @@ async def chat_endpoint(req: ChatRequest, request: Request) -> dict[str, str]:
             timeout=dispatcher.settings.chat_local_timeout_seconds,
         )
         return {"response": answer}
-    except Exception:
+    except Exception as exc:
         logger.warning("Chat local fallback failed; returning deterministic fallback response.")
-        return {"response": fallback_response}
+        return {
+            "response": build_chat_fallback_response(
+                context,
+                req.message,
+                reason=_chat_failure_reason(exc),
+            )
+        }

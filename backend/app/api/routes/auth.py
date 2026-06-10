@@ -51,6 +51,14 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def find_user_by_email(users: dict, email: str) -> tuple[Optional[str], Optional[dict]]:
+    target = email.lower()
+    for username, user in users.items():
+        if str(user.get("email", "")).lower() == target:
+            return username, user
+    return None, None
+
+
 # ── broadcast_alarm ────────────────────────────────────────
 # Exportée ici pour rétrocompatibilité avec le module WebSocket.
 # Si tu as un vrai WebSocket manager, remplace le corps par l'appel réel.
@@ -179,73 +187,48 @@ async def create_admin(
         "status": "success",
         "message": f"Admin '{data.username}' créé avec succès."
     }
-from pydantic import EmailStr
-
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
+
+
 @router.post("/auth/forgot-password")
 def forgot_password(data: ForgotPasswordRequest):
     users = load_users()
-    user_found = any(u.get("email") == data.email for u in users.values())
-    if not user_found:
-        raise HTTPException(404, "Email introuvable")
+    user_key, _ = find_user_by_email(users, data.email)
+    if not user_key:
+        raise HTTPException(status_code=404, detail="Email introuvable")
 
     from app.services.otp_service import generate_reset_code
+    from app.services.otp_service import invalidate_reset_code
     from app.services.email_service import send_reset_email
 
-    token = create_reset_token(data.email)
-    reset_link = f"http://localhost:5173/reset-password?token={token}"
-    send_reset_email(data.email, reset_link)
+    otp_code = generate_reset_code(data.email)
+    try:
+        send_reset_email(data.email, otp_code)
+    except Exception as exc:
+        invalidate_reset_code(data.email)
+        raise HTTPException(status_code=500, detail=str(exc))
 
-    return {"success": True, "message": "Code envoyé"}
+    return {"success": True, "message": "OTP sent to your email"}
 
-def create_reset_token(email: str):
-    expire = utcnow() + timedelta(minutes=5)
-
-    token = jwt.encode(
-        {
-            "sub": email,
-            "type": "password_reset",
-            "exp": expire
-        },
-        SECRET_KEY,
-        algorithm=ALGORITHM
-    )
-
-    return token
 class ResetPasswordRequest(BaseModel):
-    token: str
+    email: EmailStr
+    otp: str
     new_password: str
+
 
 @router.post("/auth/reset-password")
 def reset_password(data: ResetPasswordRequest):
-
-    try:
-        payload = jwt.decode(
-            data.token,
-            SECRET_KEY,
-            algorithms=[ALGORITHM]
-        )
-
-        if payload.get("type") != "password_reset":
-            raise HTTPException(400, "Token invalide")
-
-        email = payload.get("sub")
-
-    except Exception:
-        raise HTTPException(400, "Token expiré ou invalide")
-
     users = load_users()
-
-    user_key = None
-
-    for username, user in users.items():
-        if user.get("email") == email:
-            user_key = username
-            break
-
+    user_key, _ = find_user_by_email(users, data.email)
     if not user_key:
-        raise HTTPException(404, "Utilisateur introuvable")
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    from app.services.otp_service import verify_reset_code
+
+    is_valid, message = verify_reset_code(data.email, data.otp)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=message)
 
     users[user_key]["hashed_password"] = hash_password(data.new_password)
 

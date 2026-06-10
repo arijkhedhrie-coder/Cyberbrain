@@ -16,39 +16,39 @@ SMTP_USER = os.environ.get("SMTP_EMAIL")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
 
 
-def send_reset_email(to_email: str, reset_link: str):
+def send_reset_email(to_email: str, otp_code: str):
 
     if not SMTP_USER or not SMTP_PASSWORD:
         raise Exception("SMTP non configuré")
 
-    subject = "🔐 Réinitialisation du mot de passe"
+    subject = "Reset password verification code"
 
     html_body = f"""
     <div style="font-family: Arial; padding:20px;">
-        <h2>Réinitialisation du mot de passe</h2>
+        <h2>Password reset verification</h2>
 
-        <p>Cliquez sur le bouton ci-dessous :</p>
+        <p>Use the one-time code below to verify your password reset request:</p>
 
-        <a href="{reset_link}"
-           style="
-                display:inline-block;
-                padding:12px 20px;
-                background:#00d4ff;
-                color:white;
-                text-decoration:none;
-                border-radius:8px;
-                font-weight:bold;
-           ">
-           Réinitialiser le mot de passe
-        </a>
+        <div style="
+            display:inline-block;
+            padding:14px 20px;
+            background:#0f172a;
+            color:#00d4ff;
+            border:1px solid #1e293b;
+            border-radius:10px;
+            font-size:28px;
+            letter-spacing:6px;
+            font-weight:bold;
+        ">
+            {otp_code}
+        </div>
 
         <p style="margin-top:20px;">
-            Ce lien expire dans <strong>5 minutes</strong>.
+            This code expires in <strong>5 minutes</strong>.
         </p>
 
         <p>
-            Si vous n'avez pas demandé cette action,
-            ignorez simplement cet email.
+            If you did not request this action, you can ignore this email.
         </p>
     </div>
     """
