@@ -83,7 +83,7 @@ export const TopBar: FC<Props> = ({
           : " hors ligne"}
       </div>
 
-      <DarkModeToggle theme={theme} onToggle={onToggleTheme} />
+      
 
       
     </div>
